@@ -4,8 +4,6 @@
 
   通过前面几篇文章，我们分析了从按下电源键到内核启动、完成初始化的整个过程。在后面的文章中我们将分别深入剖析Linux内核各个重要部分的源码。考虑到后面的部分我们会从用户态的代码开始入手一步一步深入，因此在分析这些之前，我们需要仔细看一看如何实现一个从用户态到内核态再回到用户态的系统调用的全过程，即系统调用的实现。
 
-&lt;!-- more --&gt;
-
   本文的说明顺序如下
 
 * 首先从一个简单的例子开始分析glibc中对应的调用
@@ -16,7 +14,7 @@
 
   让我们从一个简单的程序开始
 
-```text
+```c
 #include <stdio.h>
 ​
 int main(int argc, char **argv)
@@ -35,14 +33,14 @@ int main(int argc, char **argv)
 
   如上所示的程序主要调用了glibc中的函数，然后在其上进行了封装而成。比如`fopen`实际使用的是`open`，这里我们就以该函数为例来说明整个调用过程。首先`open`函数的系统调用在`syscalls.list`表中定义
 
-```text
+```c
 # File name Caller Syscall name Args Strong name Weak names
 open - open Ci:siv __libc_open __open open
 ```
 
   根据此配置文件，glibc会调用脚本`make_syscall.sh`将其封装为宏，如`SYSCALL_NAME open`的形式。这些宏会通过`T_PSEUDO`来调用（位于`syscall-template.S`），而实际上使用的则是`DO_CALL(syscall_name, args)`
 
-```text
+```c
 T_PSEUDO (SYSCALL_SYMBOL, SYSCALL_NAME, SYSCALL_NARGS)
     ret
 T_PSEUDO_END (SYSCALL_SYMBOL)
@@ -61,7 +59,7 @@ T_PSEUDO_END (SYSCALL_SYMBOL)
 
   考虑到32位和64位代码结构有一些区别，因此这里需要分开讨论。在32位系统中，`DO_CALL()`位于i386 目录下的`sysdep.h`文件中
 
-```text
+```c
 /* Linux takes system call arguments in registers:
   syscall number  %eax       call-clobbered
   arg 1    %ebx       call-saved
@@ -82,7 +80,7 @@ T_PSEUDO_END (SYSCALL_SYMBOL)
 
   这里，我们将请求参数放在寄存器里面，根据系统调用的名称，得到系统调用号，放在寄存器 eax 里面，然后执行`ENTER_KERNEL`。
 
-```text
+```c
 # define ENTER_KERNEL int $0x80
 ```
 
@@ -90,7 +88,7 @@ T_PSEUDO_END (SYSCALL_SYMBOL)
 
   初始化好的中断表会等待到中断触发，触发的时候则调用对应的回调函数，这里的话就是`entry_INT80_32`。该中断首先通过`push`和`SAVE_ALL`保存所有的寄存器，存储在`pt_regs`中，然后调用`do_syscall_32_irqs_on()`函数。该函数将系统调用号从`eax`里面取出来，然后根据系统调用号，在系统调用表中找到相应的函数进行调用，并将寄存器中保存的参数取出来，作为函数参数。最后调用`INTERRUPT_RETURN`，实际使用的是`iret`指令将原来用户保存的现场包含代码段、指令指针寄存器等恢复，并返回至用户态执行。
 
-```text
+```c
 ENTRY(entry_INT80_32)
     ASM_CLAC
     pushl   %eax                    /* pt_regs->orig_ax */
@@ -123,7 +121,7 @@ static __always_inline void do_syscall_32_irqs_on(struct pt_regs *regs)
 
   对于64位系统来说，`DO_CALL`位于x86\_64 目录下的 `sysdep.h` 文件中
 
-```text
+```c
 /* The Linux/x86-64 kernel expects the system call parameters in
    registers according to the following table:
     syscall number  rax
@@ -144,7 +142,7 @@ static __always_inline void do_syscall_32_irqs_on(struct pt_regs *regs)
 
   在系统初始化的时候，`trap_init()` 除了初始化上面的中断模式，这里面还会调用 `cpu_init->syscall_init()`。这里面有这样的代码：
 
-```text
+```c
 wrmsrl(MSR_LSTAR, (unsigned long)entry_SYSCALL_64);
 ```
 
@@ -152,27 +150,27 @@ wrmsrl(MSR_LSTAR, (unsigned long)entry_SYSCALL_64);
 
   该函数开始于一条宏：`SWAPGS_UNSAFE_STACK`，其定义如下，主要是交换当前GS基寄存器中的值和特殊模块寄存器中包含的值，即**进入内核栈**。
 
-```text
+```c
 #define SWAPGS_UNSAFE_STACK    swapgs
 ```
 
   对于旧的栈，我们会将其存于`rsp_scratch`，并将栈指针移至当前进程的栈顶。
 
-```text
+```c
 movq    %rsp, PER_CPU_VAR(rsp_scratch)
 movq    PER_CPU_VAR(cpu_current_top_of_stack), %rsp
 ```
 
   下一步，我们将栈段和旧的栈指针压入栈中
 
-```text
+```c
 pushq    $__USER_DS
 pushq    PER_CPU_VAR(rsp_scratch)
 ```
 
   接下来，我们需要打开中断并保存很多寄存器到 `pt_regs` 结构里面，例如用户态的代码段、数据段、保存参数的寄存器，并校验当前线程的信息`_TIF_WORK_SYSCALL_ENTRY`，这里涉及到Linux的debugging和tracing技术，会单独在后文中详细分析。该部分代码具体如下所示。
 
-```text
+```c
 ENTRY(entry_SYSCALL_64)
     /* Construct struct pt_regs on stack */
     pushq   $__USER_DS                      /* pt_regs->ss */
@@ -211,7 +209,7 @@ ENTRY(entry_SYSCALL_64)
 
   在此之后，其实存在着两个处理分支：`entry_SYSCALL64_slow_path` 和 `entry_SYSCALL64_fast_path`，这里是根据`_TIF_WORK_SYSCALL_ENTRY`判断的结果进行选择，这里涉及到`ptrace`部分的知识，暂时先不介绍了，会在后面单独开一文详细研究。如果设置了`_TIF_ALLWORK_MASK`或者`_TIF_WORK_SYSCALL_ENTRY`，则跳转至`slow_path`，否则继续运行`fast_path`。
 
-```text
+```c
 #define _TIF_WORK_SYSCALL_ENTRY \
     (_TIF_SYSCALL_TRACE | _TIF_SYSCALL_EMU | _TIF_SYSCALL_AUDIT |   \
     _TIF_SECCOMP | _TIF_SINGLESTEP | _TIF_SYSCALL_TRACEPOINT |     \
@@ -228,7 +226,7 @@ ENTRY(entry_SYSCALL_64)
 * 将第四个参数从`r10`放入`rcx`以保持x86\_64 C ABI编译
 * 执行`sys_call_table`，去系统调用表中查找系统调用
 
-```text
+```c
 entry_SYSCALL_64_fastpath:
     /*
      * Easy case: enable interrupts and issue the syscall.  If the syscall
@@ -269,7 +267,7 @@ entry_SYSCALL_64_fastpath:
 
   `slow_path`部分的源码如下
 
-```text
+```c
 entry_SYSCALL64_slow_path:
     /* IRQs are off. */
     SAVE_EXTRA_REGS
@@ -279,7 +277,7 @@ entry_SYSCALL64_slow_path:
 
   `slow_path`会调用`entry_SYSCALL64_slow_pat->do_syscall_64()`，执行完毕后恢复寄存器，最后调用`USERGS_SYSRET64`，实际使用`sysretq`指令返回。
 
-```text
+```c
 return_from_SYSCALL_64:
     RESTORE_EXTRA_REGS
     TRACE_IRQS_IRETQ
@@ -296,7 +294,7 @@ syscall_return_via_sysret:
 
   在 `do_syscall_64` 里面，从 `rax`里面拿出系统调用号，然后根据系统调用号，在系统调用表 sys\_call\_table 中找到相应的函数进行调用，并将寄存器中保存的参数取出来，作为函数参数。
 
-```text
+```c
 __visible void do_syscall_64(struct pt_regs *regs)
 {
     struct thread_info *ti = current_thread_info();
@@ -317,7 +315,7 @@ __visible void do_syscall_64(struct pt_regs *regs)
 
   32位和64位的`sys_call_table`均位于`arch/x86/entry/syscalls/`目录下，分别为[`syscall_32.tbl`](https://github.com/torvalds/linux/blob/16f73eb02d7e1765ccab3d2018e0bd98eb93d973/arch/x86/entry/syscalls/syscall_32.tbl)和[`syscall_64.tbl`](https://github.com/torvalds/linux/blob/16f73eb02d7e1765ccab3d2018e0bd98eb93d973/arch/x86/entry/syscalls/syscall_64.tbl)。如下所示为32位和64位中`open`函数的定义
 
-```text
+```c
 5 i386 open sys_open compat_sys_open
 
 2 common open sys_open
@@ -325,14 +323,14 @@ __visible void do_syscall_64(struct pt_regs *regs)
 
   第一列的数字是系统调用号。可以看出，32 位和 64 位的系统调用号是不一样的。第三列是系统调用的名字，第四列是系统调用在内核的实现函数。不过，它们都是以 sys\_ 开头。系统调用在内核中的实现函数要有一个声明。声明往往在 [`include/linux/syscalls.h`](https://github.com/torvalds/linux/blob/16f73eb02d7e1765ccab3d2018e0bd98eb93d973/include/linux/syscalls.h)文件中。例如 `sys_open` 是这样声明的：
 
-```text
+```c
 asmlinkage long sys_open(const char __user *filename,
                                 int flags, umode_t mode);
 ```
 
   真正的实现这个系统调用，一般在一个.c 文件里面，例如 `sys_open` 的实现在 `fs/open.c` 里面。其中采用了宏的方式对函数名进行了封装，实际拆开是一样的。
 
-```text
+```c
 SYSCALL_DEFINE3(open, const char __user *, filename, int, flags, umode_t, mode)
 {
     if (force_o_largefile())
@@ -357,7 +355,7 @@ asmlinkage long sys_open(const char __user * filename, int flags, int mode)
 
   其中SYSCALL\_DEFINE3 是一个宏系统调用最多六个参数，根据参数的数目选择宏。具体是这样定义如下所示，首先使用`SYSCALL_METADATA()`宏解决`syscall_metada`结构体的初始化，该结构体包括了不同的有用区域包括系统调用的名字、系统调用表中对应的序号、系统调用的参数、参数类型链表等。
 
-```text
+```c
 #define SYSCALL_DEFINE1(name, ...) SYSCALL_DEFINEx(1, _##name, __VA_ARGS__)
 #define SYSCALL_DEFINE2(name, ...) SYSCALL_DEFINEx(2, _##name, __VA_ARGS__)
 #define SYSCALL_DEFINE3(name, ...) SYSCALL_DEFINEx(3, _##name, __VA_ARGS__)
@@ -414,7 +412,7 @@ asmlinkage long sys_open(const char __user * filename, int flags, int mode)
 
   这样最终生成`syscalls_32.h` 和 `syscalls_64.h` 就保存了系统调用号和系统调用实现函数之间的对应关系，如下所示
 
-```text
+```c
 __SYSCALL_COMMON(0, sys_read, sys_read)
 __SYSCALL_COMMON(1, sys_write, sys_write)
 __SYSCALL_COMMON(2, sys_open, sys_open)
@@ -427,14 +425,14 @@ __SYSCALL_COMMON(5, sys_newfstat, sys_newfstat)
 
   其中`__SYSCALL_COMMON`宏定义如下，主要是将对应的数字序号和系统调用名对应
 
-```text
+```c
 #define __SYSCALL_COMMON(nr, sym, compat) __SYSCALL_64(nr, sym, compat)
 #define __SYSCALL_64(nr, sym, compat) [nr] = sym,
 ```
 
   最终形成的表如下
 
-```text
+```c
 asmlinkage const sys_call_ptr_t sys_call_table[__NR_syscall_max+1] = {
     [0 ... __NR_syscall_max] = &sys_ni_syscall,
     [0] = sys_read,
@@ -448,7 +446,7 @@ asmlinkage const sys_call_ptr_t sys_call_table[__NR_syscall_max+1] = {
 
   最后，所有的系统调用会存储在`arch/x86/entry/`目录下的[`syscall_32.c`](https://github.com/torvalds/linux/blob/16f73eb02d7e1765ccab3d2018e0bd98eb93d973/arch/x86/entry/syscall_32.c)和[`syscall_64.c`](https://github.com/torvalds/linux/blob/16f73eb02d7e1765ccab3d2018e0bd98eb93d973/arch/x86/entry/syscall_64.c)中，里面包含了`syscalls_32.h` 和 `syscalls_64.h` 头文件，其形式如下：
 
-```text
+```c
 __visible const sys_call_ptr_t ia32_sys_call_table[__NR_syscall_compat_max+1] = {
         /*
          * Smells like a compiler bug -- it doesn't work
@@ -471,19 +469,19 @@ asmlinkage const sys_call_ptr_t sys_call_table[__NR_syscall_max+1] = {
 
   其中`__NR_syscall_max`宏定义规定了最大系统调用数量，该数量取决于[操作系统的架构](https://en.wikipedia.org/wiki/Comparison_of_instruction_set_architectures)，在X86下定义如下
 
-```text
+```c
 #define __NR_syscall_max 547
 ```
 
   这里还需要注意`sys_call_ptr_t`表示指向系统调用表的指针，定义为函数指针
 
-```text
+```c
 typedef void (*sys_call_ptr_t)(void);
 ```
 
   系统调用表数组中的每一个系统调用均会指向`sys_ni_syscall`，该函数表示一个未实现的系统调用（not-implement），从而系统调用表的初始化。
 
-```text
+```c
 asmlinkage long sys_ni_syscall(void)
 {
     return -ENOSYS;

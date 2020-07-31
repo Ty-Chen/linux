@@ -10,15 +10,13 @@
 * 调度器初始化`sched_init()`
 * 剩余初始化：`rest_init()`
 
-  &lt;!-- more --&gt;
-
 ## 二. 0号进程的创建
 
   `start_kernel()`上来就会运行 `set_task_stack_end_magic(&init_task)`创建初始进程。`init_task`的定义是 `struct task_struct init_task = INIT_TASK(init_task)`。它是系统创建的第一个进程，我们称为 0 号进程。**这是唯一一个没有通过 `fork` 或者 `kernel_thread`产生的进程，是进程列表的第一个**。
 
   如下所示为init\_task的定义，这里只节选了部分，采用了gcc的结构体初始化方式为其进行了直接赋值生成。
 
-```text
+```c
 /*
  * Set up the first task table, touch at your own risk!. Base=0,
  * limit=0x1fffff (=2MB)
@@ -53,7 +51,7 @@ EXPORT_SYMBOL(init_task);
 
   而 `set_task_stack_end_magic(&init_task)`函数的源码如下，主要是通过`end_of_stack()`获取栈边界地址，然后把栈底地址设置为STACK\_END\_MAGIC，作为栈溢出的标记。每个进程创建的时候，系统会为这个进程创建2个页大小的内核栈。
 
-```text
+```c
 void set_task_stack_end_magic(struct task_struct *tsk)
 {
     unsigned long *stackend;
@@ -69,7 +67,7 @@ void set_task_stack_end_magic(struct task_struct *tsk)
 
   由代码可见，`trap_init()`设置了很多的中断门（Interrupt Gate\)，用于处理各种中断，如系统调用的中断门`set_system_intr_gate(IA32_SYSCALL_VECTOR, entry_INT80_32)`。
 
-```text
+```c
 void trap_init(void)
 {
     int i;
@@ -104,7 +102,7 @@ void trap_init(void)
 
   内存相关的初始化内容放在`mm_init()`中进行，代码如下所示
 
-```text
+```c
 // init/main.c
 /*
  * Set up kernel memory allocators
@@ -165,7 +163,7 @@ static void __init mm_init(void)
 
   `rest_init()` 的一大工作是，用 `kernel_thread(kernel_init, NULL, CLONE_FS)`创建第二个进程，这个是 1 号进程。1 号进程对于操作系统来讲，有“划时代”的意义，因为它将运行一个用户进程，并从此开始形成用户态进程树。这里主要需要分析的是如何完成从内核态到用户态切换的过程。`kernel_thread()`代码如下所示，可见其中最主要的是第一个参数指针函数fn决定了栈中的内容，根据fn的不同将生成1号进程和后面的2号进程。
 
-```text
+```c
 /*
  * Create a kernel thread.
  */
@@ -184,7 +182,7 @@ pid_t kernel_thread(int (*fn)(void *), void *arg, unsigned long flags)
 
   `kernel_thread()` 的参数是一个函数 `kernel_init()`，核心代码如下：
 
-```text
+```c
 if (ramdisk_execute_command) 
 { 
     ret = run_init_process(ramdisk_execute_command);
@@ -200,7 +198,7 @@ if (!try_to_run_init_process("/sbin/init") ||
 
   这就说明，1 号进程运行的是一个文件。如果我们打开 `run_init_process()` 函数，会发现它调用的是 `do_execve()`。
 
-```text
+```c
 static int run_init_process(const char *init_filename)
 { 
     argv_init[0] = init_filename; 
@@ -212,7 +210,7 @@ static int run_init_process(const char *init_filename)
 
   接着会进行一系列的调用：`do_execve->do_execveat_common->exec_binprm->search_binary_handler`，这里`search_binary_handler()`主要是加载ELF文件（Executable and Linkable Format，可执行与可链接格式），代码如下
 
-```text
+```c
 int search_binary_handler(struct linux_binprm *bprm)
 { 
     ...... 
@@ -225,7 +223,7 @@ int search_binary_handler(struct linux_binprm *bprm)
 
   `load_binary`先调用`load_elf_binary`，最后调用`start_thread`
 
-```text
+```c
 void
 start_thread(struct pt_regs *regs, unsigned long new_ip, unsigned long new_sp)
 {
@@ -247,7 +245,7 @@ EXPORT_SYMBOL_GPL(start_thread);
 
   经过上述过程，我们完成了从内核态切换到用户态。而此时代码其实还在运行 `kernel_init`函数，会调用
 
-```text
+```c
 if (!ramdisk_execute_command)
     ramdisk_execute_command = "/init";
 ```
@@ -267,7 +265,7 @@ if (!ramdisk_execute_command)
 * 如果需要创建，则设置为`TASK_RUNNING`状态，加上锁`spin_lock`，从链表中取得`kthread_create_info` 结构的地址，在上文中已经完成插入操作\(将`kthread_create_info`结构中的 list 成员加到链表中，此时根据成员 list 的偏移获得 create\)
 * 调用`create_kthread(create)`完成线程的创建
 
-```text
+```c
 int kthreadd(void *unused)
 {
     struct task_struct *tsk = current;
@@ -309,7 +307,7 @@ int kthreadd(void *unused)
 
   而`create_kthread(create)`函数做了一件让人意外的事情：调用了`kernel_thread()`，所以又回到了创建1号进程和2号进程的函数上，这次的回调函数为`kthread`，该函数才会真正意义上分配内存、初始化一个新的内核线程。
 
-```text
+```c
 static void create_kthread(struct kthread_create_info *create)
 {
     int pid;
@@ -335,7 +333,7 @@ static void create_kthread(struct kthread_create_info *create)
 
   下面是`kthread`的源码，这里有个很重要的地方：新创建的线程由于执行了 schedule\(\) 调度，此时并没有执行，直到我们使用`wake_up_process(p)`唤醒新创建的线程。线程被唤醒后, 会接着执行最后一段`threadfn(data)`
 
-```text
+```c
 static int kthread(void *_create)
 {
     /* Copy data: it's on kthread's stack */
