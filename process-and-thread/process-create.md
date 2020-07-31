@@ -28,7 +28,7 @@
 
   写完C程序后第一步就是程序编译（其实还有IDE的预编译，那些属于编辑器操作这里不表）。编译指令如下所示
 
-```text
+```bash
 gcc -c -fPIC xxxx.c
 ```
 
@@ -135,7 +135,7 @@ gcc -o XXX XXX.O -L. -lXXX
 
   完成了上述的编译、汇编、链接，我们最终形成了可执行文件，并加载运行。在内核中，有这样一个数据结构，用来定义加载二进制文件的方法。
 
-```text
+```c
 struct linux_binfmt {
     struct list_head lh;
     struct module *module;
@@ -148,7 +148,7 @@ struct linux_binfmt {
 
   对于ELF文件格式，其对应实现为
 
-```text
+```c
 static struct linux_binfmt elf_format = {
     .module         = THIS_MODULE,
     .load_binary    = load_elf_binary,
@@ -175,7 +175,7 @@ static struct linux_binfmt elf_format = {
 
 1. 处理线程的属性参数。例如前面写程序的时候，我们设置的线程栈大小。如果没有传入线程属性，就取默认值。
 
-```text
+```c
 const struct pthread_attr *iattr = (struct pthread_attr *) attr;
 struct pthread_attr default_attr;
 //c11 thrd_create
@@ -189,13 +189,13 @@ if (iattr == NULL || c11)
 
 1. 就像在内核里每一个进程或者线程都有一个 `task_struct` 结构，在用户态也有一个用于维护线程的结构，就是这个 `pthread` 结构。
 
-```text
+```c
 struct pthread *pd = NULL;
 ```
 
 1. 凡是涉及函数的调用，都要使用到栈。每个线程也有自己的栈，接下来就是创建线程栈了。
 
-```text
+```c
 int err = ALLOCATE_STACK (iattr, &pd);
 ```
 
@@ -209,7 +209,7 @@ int err = ALLOCATE_STACK (iattr, &pd);
 * 填充`pthread` 这个结构里面的成员变量 `stackblock、stackblock_size、guardsize、specific`。这里的 `specific` 是用于存放`Thread Specific Data` 的，也即属于线程的全局变量；
 * 将这个线程栈放到 `stack_used` 链表中，其实管理线程栈总共有两个链表，一个是 `stack_used`，也就是这个栈正被使用；另一个是`stack_cache`，就是上面说的，一旦线程结束，先缓存起来，不释放，等有其他的线程创建的时候，给其他的线程用。
 
-```text
+```c
 # define ALLOCATE_STACK(attr, pd) allocate_stack (attr, pd, &stackaddr)
 
 static int
@@ -286,7 +286,7 @@ allocate_stack (const struct pthread_attr *attr, struct pthread **pdp,
 
   多进程是一种常见的程序实现方式，采用的系统调用为`fork()`函数。前文中已经详细叙述了系统调用的整个过程，对于`fork()`来说，最终会在系统调用表中查找到对应的系统调用`sys_fork`完成子进程的生成，而`sys_fork` 会调用 [`_do_fork()`](https://elixir.bootlin.com/linux/v5.7-rc1/source/kernel/fork.c#L2403)。
 
-```text
+```c
 SYSCALL_DEFINE0(fork)
 {
 ......
@@ -296,7 +296,7 @@ SYSCALL_DEFINE0(fork)
 
   关于`__do_fork()`先按下不表，再接着看看线程。我们接着`pthread_create ()`看。其实有了用户态的栈，接着需要解决的就是用户态的程序从哪里开始运行的问题。`start_routine()` 就是给线程的函数，`start_routine()`， 参数 `arg`，以及调度策略都要赋值给 `pthread`。接下来 `__nptl_nthreads` 加一，说明又多了一个线程。
 
-```text
+```c
 pd->start_routine = start_routine;
 pd->arg = arg;
 pd->schedpolicy = self->schedpolicy;
@@ -309,7 +309,7 @@ retval = create_thread (pd, iattr, &stopped_start, STACK_VARIABLES_ARGS, &thread
 
   真正创建线程的是调用 `create_thread()` 函数，这个函数定义如下。同时，这里还规定了当完成了内核态线程创建后回调的位置：`start_thread()`。
 
-```text
+```c
 static int
 create_thread (struct pthread *pd, const struct pthread_attr *attr,
 bool *stopped_start, STACK_VARIABLES_PARMS, bool *thread_ran)
@@ -324,7 +324,7 @@ bool *stopped_start, STACK_VARIABLES_PARMS, bool *thread_ran)
 
   在 `start_thread()` 入口函数中，才真正的调用用户提供的函数，在用户的函数执行完毕之后，会释放这个线程相关的数据。例如，线程本地数据 `thread_local variables`，线程数目也减一。如果这是最后一个线程了，就直接退出进程，另外 `__free_tcb()` 用于释放 `pthread`。
 
-```text
+```c
 #define START_THREAD_DEFN \
   static int __attribute__ ((noreturn)) start_thread (void *arg)
 
@@ -346,7 +346,7 @@ START_THREAD_DEFN
 
   `__free_tcb ()`会调用 `__deallocate_stack()`来释放整个线程栈，这个线程栈要从当前使用线程栈的列表 `stack_used` 中拿下来，放到缓存的线程栈列表 `stack_cache`中，从而结束了线程的生命周期。
 
-```text
+```c
 void
 internal_function
 __free_tcb (struct pthread *pd)
@@ -373,7 +373,7 @@ __deallocate_stack (struct pthread *pd)
 
   `ARCH_CLONE`其实调用的是 `__clone()`。
 
-```text
+```c
 # define ARCH_CLONE __clone
 
 /* The userland implementation is:
@@ -423,7 +423,7 @@ PSEUDO_END (__clone)
 
   内核中的`clone()`定义如下。如果在进程的主线程里面调用其他系统调用，当前用户态的栈是指向整个进程的栈，栈顶指针也是指向进程的栈，指令指针也是指向进程的主线程的代码。此时此刻执行到这里，调用 `clone`的时候，用户态的栈、栈顶指针、指令指针和其他系统调用一样，都是指向主线程的。但是对于线程来说，这些都要变。因为我们希望当 `clone` 这个系统调用成功的时候，除了内核里面有这个线程对应的 `task_struct`，当系统调用返回到用户态的时候，用户态的栈应该是线程的栈，栈顶指针应该指向线程的栈，指令指针应该指向线程将要执行的那个函数。所以这些都需要我们自己做，将线程要执行的函数的参数和指令的位置都压到栈里面，当从内核返回，从栈里弹出来的时候，就从这个函数开始，带着这些参数执行下去。
 
-```text
+```c
 SYSCALL_DEFINE5(clone, unsigned long, clone_flags, unsigned long, newsp,
      int __user *, parent_tidptr,
      int __user *, child_tidptr,
@@ -435,7 +435,7 @@ SYSCALL_DEFINE5(clone, unsigned long, clone_flags, unsigned long, newsp,
 
   线程和进程到了这里殊途同归，进入了同一个函数`__do_fork()`工作。其源码如下所示，主要工作包括复制结构`copy_process()`和唤醒新进程`wak_up_new()`两部分。其中线程会根据`create_thread()`函数中的`clone_flags`完成上文所述的栈顶指针和指令指针的切换，以及一些线程和进程的微妙区别。
 
-```text
+```c
 long _do_fork(unsigned long clone_flags,
         unsigned long stack_start,
         unsigned long stack_size,
@@ -475,7 +475,7 @@ long _do_fork(unsigned long clone_flags,
 
   如下所示为[`copy_process()`](https://elixir.bootlin.com/linux/v5.7-rc1/source/kernel/fork.c#L1828)函数源码精简版，`task_struct`结构复杂也注定了复制过程的复杂性，因此此处省略了很多，仅保留了各个部分的主要调用函数
 
-```text
+```c
 static __latent_entropy struct task_struct *copy_process(
           unsigned long clone_flags,
           unsigned long stack_start,
@@ -526,7 +526,7 @@ static __latent_entropy struct task_struct *copy_process(
 * 调用 `arch_dup_task_struct(struct task_struct *dst, struct task_struct *src)`，将 `task_struct` 进行复制，其实就是调用 `memcpy`；
 * 调用`setup_thread_stack`设置 `thread_info`。
 
-```text
+```c
 static struct task_struct *dup_task_struct(struct task_struct *orig, int node)
 {
     struct task_struct *tsk;
@@ -556,7 +556,7 @@ static struct task_struct *dup_task_struct(struct task_struct *orig, int node)
 * 调用`prepare_creds`，准备一个新的 `struct cred *new`。如何准备呢？其实还是从内存中分配一个新的 `struct cred`结构，然后调用 `memcpy` 复制一份父进程的 cred；
 * 接着 `p->cred = p->real_cred = get_cred(new)`，将新进程的“我能操作谁”和“谁能操作我”两个权限都指向新的 `cred`。
 
-```text
+```c
 /*
  * Copy credentials for the new process created by fork()
  *
@@ -597,7 +597,7 @@ int copy_creds(struct task_struct *p, unsigned long clone_flags)
   * 对于进程来说，这些信息用一个结构 `files_struct` 来维护，每个打开的文件都有一个文件描述符。在 copy\_files 函数里面调用 `dup_fd`，在这里面会创建一个新的 files\_struct，然后将所有的文件描述符数组 `fdtable` 拷贝一份。
   * 对于线程来说，由于设置了`CLONE_FILES` 标识位变成将原来的`files_struct` 引用计数加一，**并不会拷贝文件**。
 
-```text
+```c
 static int copy_files(unsigned long clone_flags, struct task_struct *tsk)
 {
     struct files_struct *oldf, *newf;
@@ -628,7 +628,7 @@ out:
   * 对于进程来说，这些信息用一个结构 `fs_struct` 来维护。一个进程有自己的根目录和根文件系统 `root`，也有当前目录 `pwd` 和当前目录的文件系统，都在 `fs_struct` 里面维护。`copy_fs` 函数里面调用 `copy_fs_struct`，创建一个新的 `fs_struct`，并复制原来进程的 `fs_struct`。
   * 对于线程来说，由于设置了`CLONE_FS` 标识位变成将原来的`fs_struct` 的用户数加一，**并不会拷贝文件系统结构**。
 
-```text
+```c
 static int copy_fs(unsigned long clone_flags, struct task_struct *tsk)
 {
     struct fs_struct *fs = current->fs;
@@ -657,7 +657,7 @@ static int copy_fs(unsigned long clone_flags, struct task_struct *tsk)
   * 对于进程来说，会分配一个新的 `sighand_struct`。这里最主要的是维护信号处理函数，在 `copy_sighand` 里面会调用 `memcpy`，将信号处理函数 `sighand->action` 从父进程复制到子进程。
   * 对于线程来说，由于设计了`CLONE_SIGHAND`标记位，会对引用计数加一并退出，没有分配新的信号变量。
 
-```text
+```c
 static int copy_sighand(unsigned long clone_flags, struct task_struct *tsk)
 {
     struct sighand_struct *sig;
@@ -679,7 +679,7 @@ static int copy_sighand(unsigned long clone_flags, struct task_struct *tsk)
 
 * `init_sigpending` 和 `copy_signal` 用于初始化信号结构体，并且复制用于维护发给这个进程的信号的数据结构。`copy_signal` 函数会分配一个新的 `signal_struct`，并进行初始化。对于线程来说也是直接退出并未复制。
 
-```text
+```c
 static int copy_signal(unsigned long clone_flags, struct task_struct *tsk)
 {
     struct signal_struct *sig;
@@ -704,7 +704,7 @@ static int copy_signal(unsigned long clone_flags, struct task_struct *tsk)
    * 进程都有自己的内存空间，用 `mm_struct` 结构来表示。`copy_mm()` 函数中调用 `dup_mm()`，分配一个新的 `mm_struct` 结构，调用 `memcpy` 复制这个结构。`dup_mmap()` 用于复制内存空间中内存映射的部分。前面讲系统调用的时候，我们说过，`mmap` 可以分配大块的内存，其实 `mmap` 也可以将一个文件映射到内存中，方便可以像读写内存一样读写文件，这个在内存管理那节我们讲。
    * 线程不会复制内存空间，因此因为`CLONE_VM`标识位而直接指向了原来的`mm_struct`。
 
-```text
+```c
 static int copy_mm(unsigned long clone_flags, struct task_struct *tsk)
 {
     struct mm_struct *mm, *oldmm;
@@ -743,7 +743,7 @@ fail_nomem:
 * `tgid`: 对进程来说是自己的`pid`，对线程来说是当前进程的`pid`
 * `real_parent` : 对进程来说即当前进程，对线程来说则是当前进程的`real_parent`
 
-```text
+```c
 static __latent_entropy struct task_struct *copy_process(......) {
 ......    
     p->pid = pid_nr(pid);
@@ -775,7 +775,7 @@ static __latent_entropy struct task_struct *copy_process(......) {
 
   `_do_fork` 做的第二件大事是通过调用 `wake_up_new_task()`唤醒进程。
 
-```text
+```c
 void wake_up_new_task(struct task_struct *p)
 {
     struct rq_flags rf;
@@ -792,7 +792,7 @@ void wake_up_new_task(struct task_struct *p)
 
   首先，我们需要将进程的状态设置为 `TASK_RUNNING`。`activate_task()` 函数中会调用 `enqueue_task()`。
 
-```text
+```c
 void activate_task(struct rq *rq, struct task_struct *p, int flags)
 {
     if (task_contributes_to_load(p))
@@ -812,7 +812,7 @@ static inline void enqueue_task(struct rq *rq, struct task_struct *p, int flags)
 
   如果是 `CFS` 的调度类，则执行相应的 `enqueue_task_fair()`。在 `enqueue_task_fair()` 中取出的队列就是 `cfs_rq`，然后调用 `enqueue_entity()`。在 `enqueue_entity()` 函数里面，会调用 `update_curr()`，更新运行的统计量，然后调用 `__enqueue_entity`，将 `sched_entity` 加入到红黑树里面，然后将 `se->on_rq = 1` 设置在队列上。回到 `enqueue_task_fair` 后，将这个队列上运行的进程数目加一。然后，`wake_up_new_task` 会调用 `check_preempt_curr`，看是否能够抢占当前进程。
 
-```text
+```c
 static void
 enqueue_task_fair(struct rq *rq, struct task_struct *p, int flags)
 {
@@ -840,7 +840,7 @@ enqueue_task_fair(struct rq *rq, struct task_struct *p, int flags)
 
   在 `check_preempt_curr` 中，会调用相应的调度类的 `rq->curr->sched_class->check_preempt_curr(rq, p, flags)`。对于`CFS`调度类来讲，调用的是 `check_preempt_wakeup`。在 `check_preempt_wakeup`函数中，前面调用 `task_fork_fair`的时候，设置 `sysctl_sched_child_runs_first` 了，已经将当前父进程的 `TIF_NEED_RESCHED` 设置了，则直接返回。否则，`check_preempt_wakeup` 还是会调用 `update_curr` 更新一次统计量，然后 `wakeup_preempt_entity` 将父进程和子进程 PK 一次，看是不是要抢占，如果要则调用 `resched_curr` 标记父进程为 `TIF_NEED_RESCHED`。如果新创建的进程应该抢占父进程，在什么时间抢占呢？别忘了 fork 是一个系统调用，从系统调用返回的时候，是抢占的一个好时机，如果父进程判断自己已经被设置为 `TIF_NEED_RESCHED`，就让子进程先跑，抢占自己。
 
-```text
+```c
 static void check_preempt_wakeup(struct rq *rq, struct task_struct *p, int wake_flags)
 {
     struct task_struct *curr = rq->curr;

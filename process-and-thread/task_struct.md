@@ -23,7 +23,7 @@
 
   任务ID是任务的唯一标识，在`tast_struct`中，主要涉及以下几个ID
 
-```text
+```c
 pid_t pid;
 pid_t tgid;
 struct task_struct *group_leader;
@@ -37,7 +37,7 @@ struct task_struct *group_leader;
 
   除了0号进程以外，其他进程都是有父进程的。全部进程其实就是一颗进程树，相关成员变量如下所示
 
-```text
+```c
 struct task_struct __rcu *real_parent; /* real parent process */
 struct task_struct __rcu *parent; /* recipient of SIGCHLD, wait4() reports */
 struct list_head children;      /* list of my children */
@@ -54,7 +54,7 @@ struct list_head sibling;       /* linkage in my parent's children list */
 
   任务状态部分主要涉及以下变量
 
-```text
+```c
  volatile long state;    /* -1 unrunnable, 0 runnable, >0 stopped */
  int exit_state;
  unsigned int flags;
@@ -62,7 +62,7 @@ struct list_head sibling;       /* linkage in my parent's children list */
 
   其中状态`state`通过设置比特位的方式来赋值，具体值在`include/linux/sched.h`中定义
 
-```text
+```c
 /* Used in tsk->state: */
 #define TASK_RUNNING                    0
 #define TASK_INTERRUPTIBLE              1
@@ -101,7 +101,7 @@ struct list_head sibling;       /* linkage in my parent's children list */
 
   上面的进程状态和进程的运行、调度有关系，还有其他的一些状态，我们称为标志。放在 `flags`字段中，这些字段都被定义成为宏，以 PF 开头。
 
-```text
+```c
 #define PF_EXITING    0x00000004
 #define PF_VCPU      0x00000010
 #define PF_FORKNOEXEC    0x00000040
@@ -119,7 +119,7 @@ struct list_head sibling;       /* linkage in my parent's children list */
 
   任务权限主要包括以下两个变量，`real_cred`是指可以操作本任务的对象，而`red`是指本任务可以操作的对象。
 
-```text
+```c
 /* Objective and real subjective task credentials (COW): */
 const struct cred __rcu         *real_cred;
 /* Effective (overridable) subjective task credentials (COW): */
@@ -128,7 +128,7 @@ const struct cred __rcu         *cred;
 
   cred定义如下所示
 
-```text
+```c
 struct cred {
 ......
     kuid_t          uid;            /* real UID of the task */
@@ -161,7 +161,7 @@ struct cred {
 
   原来控制进程的权限，要么是高权限的 root 用户，要么是一般权限的普通用户，这时候的问题是，root 用户权限太大，而普通用户权限太小。有时候一个普通用户想做一点高权限的事情，必须给他整个 root 的权限。这个太不安全了。于是，我们引入新的机制 capabilities，用位图表示权限，在`capability.h`可以找到定义的权限。我这里列举几个。
 
-```text
+```c
 #define CAP_CHOWN            0
 #define CAP_KILL             5
 #define CAP_NET_BIND_SERVICE 10
@@ -180,7 +180,7 @@ struct cred {
 
   运行统计从宏观来说也是一种状态变量，但是和任务状态不同，其存储的主要是运行时间相关的成员变量，具体如下所示
 
-```text
+```c
 u64        utime;//用户态消耗的CPU时间
 u64        stime;//内核态消耗的CPU时间
 unsigned long      nvcsw;//自愿(voluntary)上下文切换计数
@@ -193,7 +193,7 @@ u64        real_start_time;//进程启动时间，包含睡眠时间
 
   进程调度部分较为复杂，会单独拆分讲解，这里先简单罗列成员变量。
 
-```text
+```c
 //是否在运行队列上
 int        on_rq;
 //优先级
@@ -219,7 +219,7 @@ struct sched_info    sched_info;
 
   信号处理相关的数据结构如下所示
 
-```text
+```c
 /* Signal handlers: */
 struct signal_struct    *signal;
 struct sighand_struct    *sighand;
@@ -244,7 +244,7 @@ unsigned int      sas_ss_flags;
 
   内存管理部分成员变量如下所示
 
-```text
+```c
 struct mm_struct                *mm;
 struct mm_struct                *active_mm;
 ```
@@ -255,7 +255,7 @@ struct mm_struct                *active_mm;
 
   文件系统部分也会在后面详细说明，这里先简单列举成员变量
 
-```text
+```c
 /* Filesystem information: */
 struct fs_struct                *fs;
 /* Open file information: */
@@ -266,21 +266,21 @@ struct files_struct             *files;
 
   内核栈相关的成员变量如下所示。为了介绍清楚其作用，我们需要从为什么需要内核栈开始逐步讨论。
 
-```text
+```c
 struct thread_info    thread_info;
 void  *stack;
 ```
 
   当进程产生系统调用时，会利用中断陷入内核态。而内核态中也存在着各种函数的调用，因此我们需要有内核态函数栈。Linux 给每个 task 都分配了内核栈。在 32 位系统上 `arch/x86/include/asm/page_32_types.h`，是这样定义的：一个 `PAGE_SIZE`是 4K，左移一位就是乘以 2，也就是 8K。
 
-```text
+```c
 #define THREAD_SIZE_ORDER  1
 #define THREAD_SIZE    (PAGE_SIZE << THREAD_SIZE_ORDER)
 ```
 
   内核栈在 64 位系统上 `arch/x86/include/asm/page_64_types.h`，是这样定义的：在 PAGE\_SIZE 的基础上左移两位，也即 16K，并且要求起始地址必须是 8192 的整数倍。
 
-```text
+```c
 #ifdef CONFIG_KASAN
 #define KASAN_STACK_ORDER 1
 #else
@@ -297,7 +297,7 @@ void  *stack;
 
   这个结构是对 `task_struct` 结构的补充。因为 `task_struct` 结构庞大但是通用，不同的体系结构就需要保存不同的东西，所以往往与体系结构有关的，都放在 `thread_info` 里面。在内核代码里面采用一个 `union`将`thread_info`和`stack` 放在一起，在 `include/linux/sched.h` 中定义用以表示内核栈。由代码可见，这里根据架构不同可能采用旧版的`task_struct`直接放在内核栈，而新版的均采用`thread_info`，以节约空间。
 
-```text
+```c
 union thread_union {
 #ifndef CONFIG_ARCH_TASK_STRUCT_ON_STACK
     struct task_struct task;
@@ -311,7 +311,7 @@ union thread_union {
 
   另一个结构 `pt_regs`，定义如下。其中，32 位和 64 位的定义不一样。
 
-```text
+```c
 #ifdef __i386__
 struct pt_regs {
   unsigned long bx;
@@ -366,7 +366,7 @@ struct pt_regs {
 
   如果有一个 `task_struct` 的 `stack` 指针在手，即可通过下面的函数找到这个线程内核栈：
 
-```text
+```c
 static inline void *task_stack_page(const struct task_struct *task)
 {
     return task->stack;
@@ -375,7 +375,7 @@ static inline void *task_stack_page(const struct task_struct *task)
 
   从 `task_struct` 如何得到相应的 `pt_regs` 呢？我们可以通过下面的函数，先从 `task_struct`找到内核栈的开始位置。然后这个位置加上 `THREAD_SIZE` 就到了最后的位置，然后转换为 `struct pt_regs`，再减一，就相当于减少了一个 `pt_regs` 的位置，就到了这个结构的首地址。
 
-```text
+```c
 /*
  * TOP_OF_KERNEL_STACK_PADDING reserves 8 bytes on top of the ring0 stack.
  * This is necessary to guarantee that the entire "struct pt_regs"
@@ -396,7 +396,7 @@ static inline void *task_stack_page(const struct task_struct *task)
 
   这里面有一个`TOP_OF_KERNEL_STACK_PADDING`，这个的定义如下：
 
-```text
+```c
 #ifdef CONFIG_X86_32
 # ifdef CONFIG_VM86
 #  define TOP_OF_KERNEL_STACK_PADDING 16
@@ -414,7 +414,7 @@ static inline void *task_stack_page(const struct task_struct *task)
 
   首先来看看`thread_info`的定义吧。下面所示为早期版本的`thread_info`和新版本`thread_info`的源码
 
-```text
+```c
 struct thread_info {
     struct task_struct  *task;    /* main task structure */
     __u32      flags;    /* low level flags */
@@ -434,7 +434,7 @@ struct thread_info {
 
   老版中采取`current_thread_info()->task` 来获取`task_struct`。`thread_info` 的位置就是内核栈的最高位置，减去 THREAD\_SIZE，就到了 `thread_info` 的起始地址。
 
-```text
+```c
 static inline struct thread_info *current_thread_info(void)
 {
     return (struct thread_info *)(current_top_of_stack() - THREAD_SIZE);
@@ -443,7 +443,7 @@ static inline struct thread_info *current_thread_info(void)
 
   而新版本则采用了另一种`current_thread_info`
 
-```text
+```c
 #include <asm/current.h>
 #define current_thread_info() ((struct thread_info *)current)
 #endif
@@ -451,7 +451,7 @@ static inline struct thread_info *current_thread_info(void)
 
   那 `current` 又是什么呢？在 `arch/x86/include/asm/current.h` 中定义了。
 
-```text
+```c
 struct task_struct;
 
 DECLARE_PER_CPU(struct task_struct *, current_task);
@@ -466,19 +466,19 @@ static __always_inline struct task_struct *get_current(void)
 
   新的机制里面，每个 CPU 运行的 `task_struct` 不通过`thread_info` 获取了，而是直接放在 Per CPU 变量里面了。多核情况下，CPU 是同时运行的，但是它们共同使用其他的硬件资源的时候，我们需要解决多个 CPU 之间的同步问题。Per CPU 变量是内核中一种重要的同步机制。顾名思义，Per CPU 变量就是为每个 CPU 构造一个变量的副本，这样多个 CPU 各自操作自己的副本，互不干涉。比如，当前进程的变量 current\_task 就被声明为 Per CPU 变量。要使用 Per CPU 变量，首先要声明这个变量，在 `arch/x86/include/asm/current.h` 中有：
 
-```text
+```c
 DECLARE_PER_CPU(struct task_struct *, current_task);
 ```
 
   然后是定义这个变量，在 `arch/x86/kernel/cpu/common.c` 中有：
 
-```text
+```c
 DEFINE_PER_CPU(struct task_struct *, current_task) = &init_task;
 ```
 
   也就是说，系统刚刚初始化的时候，`current_task` 都指向`init_task`。当某个 CPU 上的进程进行切换的时候，`current_task` 被修改为将要切换到的目标进程。例如，进程切换函数`__switch_to` 就会改变 `current_task`。
 
-```text
+```c
 __visible __notrace_funcgraph struct task_struct *
 __switch_to(struct task_struct *prev_p, struct task_struct *next_p)
 {
@@ -491,7 +491,7 @@ __switch_to(struct task_struct *prev_p, struct task_struct *next_p)
 
   当要获取当前的运行中的 `task_struct` 的时候，就需要调用 `this_cpu_read_stable` 进行读取。
 
-```text
+```c
 #define this_cpu_read_stable(var)       percpu_stable_op("mov", var)
 ```
 
