@@ -1,6 +1,6 @@
 # 字符设备
 
-### 一. 前言
+## 一. 前言
 
   上文中我们分析了虚拟文件系统的结构以及常见的文件操作从用户态到虚拟文件系统再到底层实际文件系统的过程。而实际上我们并没有说明实际的文件系统如ext4是如何和磁盘进行交互的，这就是本文和下篇文章的重点：I/O之块设备和字符设备。输入输出设备我们大致可以分为两类：块设备（Block Device）和字符设备（Character Device）。
 
@@ -9,7 +9,7 @@
 
   本文首先介绍虚拟文件系统下层直至硬件输入输出设备的结构关系，然后重点分析字符设备相关的整体逻辑情况。
 
-### 二. I/O架构
+## 二. I/O架构
 
   由于各种输入输出设备具有不同的硬件结构、驱动程序，因此我们采取了设备控制器这一中间层对上提供统一接口。设备控制器通过缓存来处理CPU和硬件I/O之间的交互关系，通过中断进行通知，因此我们需要有中断处理器对各种中断进行统一。由于每种设备的控制器的寄存器、缓冲区等使用模式，指令都不同，所以对于操作系统还需要一层对接各个设备控制器的设备驱动程序。
 
@@ -33,7 +33,7 @@
 
   在下文的分析中，我们就将按照此顺序来剖析字符设备的源码，以弄懂字符设备的一般运行逻辑。关于设备驱动代码编写的详细知识可以参考《Linux设备驱动》一书，本文重点不在于如何编写代码，而是在于操作系统中的字符设备和块设备如何工作。
 
-### 三. 字符设备基本构成
+## 三. 字符设备基本构成
 
   一个字符设备由3个部分组成：
 
@@ -43,7 +43,7 @@
 
   这里主要涉及到了两个结构体：字符设备信息存储的`struct cdev`以及管理字符设备的`cdev_map`。
 
-```text
+```c
 struct cdev {
     struct kobject kobj;                  //内嵌的内核对象.
     struct module *owner;                 //该字符设备所在的内核模块的对象指针.
@@ -56,7 +56,7 @@ struct cdev {
 
   `cdev`结构体还有另一个相关联的结构体`char_device_struct`。这里首先会定义主设备号和次设备号：主设备号用来标识与设备文件相连的驱动程序，用来反映设备类型。次设备号被驱动程序用来辨别操作的是哪个设备，用来区分同类型的设备。这里`minorct`指的是分配的区域，用于主设备号和次设备号的分配工作。
 
-```text
+```c
 static struct char_device_struct {
     struct char_device_struct *next;
     unsigned int major;
@@ -69,7 +69,7 @@ static struct char_device_struct {
 
   `cdev_map`用于维护所有字符设备驱动，实际是结构体`kobj_map`，主要包括了一个互斥锁`lock`，一个`probes[255]`数组，数组元素为`struct probe`的指针，该结构体包括链表项、设备号、设备号范围等。所以我们将字符设备驱动最后保存为一个`probe`，并用`cdev_map/kobj_map`进行统一管理。
 
-```text
+```c
 static struct kobj_map *cdev_map;
 ​
 struct kobj_map {
@@ -86,15 +86,15 @@ struct kobj_map {
 };
 ```
 
-### 四. 打开字符设备
+## 四. 打开字符设备
 
   字符设备有很多种，这里以打印机设备为输出设备的例子，源码位于`drivers/char/lp.c`。以鼠标为输入设备的例子，源码位于`drivers/input/mouse/logibm.c`。下面将根据上述的字符设备的三个组成部分分别剖析如何创建并打开字符设备。
 
-#### 4.1 加载
+### 4.1 加载
 
   字符设备的使用从加载开始，通常我们会使用`insmod`命令或者`modprobe`命令加载`ko`文件，`ko`文件的加载则从`module_init`调用该设备自定义的初始函数开始。对于打印机来说，其初始化函数定义为`lp_init_module()`，实际调用`lp_init()`。`lp_init()`会初始化打印机结构体，并调用`register_chardev()`注册该字符设备。
 
-```text
+```c
 module_init(lp_init_module);
 ​
 static int __init lp_init_module(void)
@@ -121,7 +121,7 @@ static int __init lp_init(void)
 * 将 `cdev` 的 `ops` 成员变量指向这个模块声明的 `file_operations`
 * 调用`cdev_add()`将这个字符设备添加到结构体 `struct kobj_map *cdev_map` ，该结构体用于统一管理所有字符设备。
 
-```text
+```c
 static inline int register_chrdev(unsigned int major, const char *name,
                   const struct file_operations *fops)
 {
@@ -154,7 +154,7 @@ int __register_chrdev(unsigned int major, unsigned int baseminor,
 
   对于鼠标来说，加载也是类似的：注册为`logibm_init()`函数。但是这里没有调用`register_chrdev()`而是使用`input_register_device()`，原因在于输入设备会统一由`input_init()`初始化，之后加入的输入设备通过`input_register_device()`注册到`input`的管理结构体中进行统一管理。
 
-```text
+```c
 module_init(logibm_init);
 ​
 static int __init logibm_init(void)
@@ -165,11 +165,11 @@ static int __init logibm_init(void)
 }
 ```
 
-#### 4.2 创建文件设备
+### 4.2 创建文件设备
 
   加载完`ko`文件后，Linux内核会通过`mknod`在/dev目录下创建一个设备文件，只有有了这个设备文件，我们才能通过文件系统的接口对这个设备文件进行操作。`mknod`本身是一个系统调用，主要逻辑为调用`user_path_create()`为该设备文件创建`dentry`，然后对于`S_IFCHAR`或者`S_IFBLK`会调用`vfs_mknod()`去调用对应文件系统的操作。
 
-```text
+```c
 SYSCALL_DEFINE3(mknod, const char __user *, filename, umode_t, mode, unsigned, dev)
 {
     return sys_mknodat(AT_FDCWD, filename, mode, dev);
@@ -203,7 +203,7 @@ int vfs_mknod(struct inode *dir, struct dentry *dentry, umode_t mode, dev_t dev)
 
   对于`/dev`目录下的设备驱动来说，所属的文件系统为`devtmpfs`文件系统，即设备驱动临时文件系统。`devtmpfs`对应的文件系统定义如下
 
-```text
+```c
 static struct file_system_type dev_fs_type = { 
     .name = "devtmpfs", 
     .mount = dev_mount, 
@@ -223,7 +223,7 @@ static struct dentry *dev_mount(struct file_system_type *fs_type, int flags,
 
   从这里可以看出，`devtmpfs` 在挂载的时候有两种模式：一种是 `ramfs`，一种是 `shmem` ，都是基于内存的文件系统。这两个 `mknod` 虽然实现不同，但是都会调用到同一个函数 `init_special_inode()`。显然这个文件是个特殊文件，`inode` 也是特殊的。这里这个 `inode` 可以关联字符设备、块设备、FIFO 文件、Socket 等。我们这里只看字符设备。这里的 `inode` 的 `file_operations` 指向一个 `def_chr_fops`，这里面只有一个 `open`，就等着你打开它。另外，`inode` 的 `i_rdev` 指向这个设备的 `dev_t`。通过这个 `dev_t`，可以找到我们刚刚加载的字符设备 `cdev`。
 
-```text
+```c
 static const struct inode_operations ramfs_dir_inode_operations = {
 ......
   .mknod    = ramfs_mknod,
@@ -261,7 +261,7 @@ const struct file_operations def_chr_fops = {
 
   由此我们完成了`/dev`下文件的创建，并利用`rdev`和生成的字符设备进行了关联。
 
-#### 4.3 打开字符设备
+### 4.3 打开字符设备
 
   如打开普通文件一样，打开字符设备也会首先分配对应的文件描述符`fd`，然后生成`struct file`结构体与其绑定，并将`file`关联到对应的`dentry`从而可以接触`inode`。在进程里面调用 `open()` 函数，最终会调用到这个特殊的 `inode` 的 `open()` 函数，也就是 `chrdev_open()`。
 
@@ -271,7 +271,7 @@ const struct file_operations def_chr_fops = {
 * 调用`fops_get()`将设备驱动程序自己定义的文件操作`p->ops`赋值给`fops`
 * 调用设备驱动程序的 `file_operations` 的 `open()` 函数真正打开设备。对于打印机，调用的是 `lp_open()`。对于鼠标调用的是 `input_proc_devices_open()`，最终会调用到 `logibm_open()`。
 
-```text
+```c
 /*
  * Called every time a character special file is opened
  */
@@ -298,13 +298,13 @@ static int chrdev_open(struct inode *inode, struct file *filp)
 
 ![img](https://static001.geekbang.org/resource/image/2e/e6/2e29767e84b299324ea7fc524a3dcee6.jpeg)
 
-### 五. 写入字符设备
+## 五. 写入字符设备
 
   写入字符设备和写入普通文件一样，调用`write()`函数执行。该函数在内核里查询系统调用表最终调用`sys_write()`，并根据`fd`描述符获取对应的`file`结构体，接着调用`vfs_write()`去调用对应的文件系统自定义的写入函数`file->f_op->write()`。对于打印机来说，最终调用的是自定义的`lp_write()`函数。
 
   这里写入的重点在于调用 `copy_from_user()` 将数据从用户态拷贝到内核态的缓存中，然后调用 `parport_write()` 写入外部设备。这里还有一个 `schedule()` 函数，也即写入的过程中，给其他线程抢占 CPU 的机会。如果写入字节数多，不能一次写完，就会在循环里一直调用 `copy_from_user()` 和 `parport_write()`，直到写完为止。
 
-```text
+```c
 static ssize_t lp_write(struct file *file, const char __user *buf,
             size_t count, loff_t *ppos)
 {
@@ -351,7 +351,7 @@ static ssize_t lp_write(struct file *file, const char __user *buf,
 }
 ```
 
-### 六. 字符设备的控制
+## 六. 字符设备的控制
 
   在Linux中，我们常用`ioctl()`来对I/O设备进行一些读写之外的特殊操作。其参数主要由文件描述符`fd`，命令`cmd`以及命令参数`arg`构成。其中cmd由几个部分拼接成整型，主要结构为
 
@@ -364,7 +364,7 @@ static ssize_t lp_write(struct file *file, const char __user *buf,
 
   `ioctl()`也是一个系统调用，其中`fd` 是这个设备的文件描述符，`cmd` 是传给这个设备的命令，`arg` 是命令的参数。主要调用`do_vfs_ioctl()`完成实际功能。
 
-```text
+```c
 SYSCALL_DEFINE3(ioctl, unsigned int, fd, unsigned int, cmd, unsigned long, arg)
 {
     int error;
@@ -378,7 +378,7 @@ SYSCALL_DEFINE3(ioctl, unsigned int, fd, unsigned int, cmd, unsigned long, arg)
 
   `do_vfs_ioctl()`对于已经定义好的 `cmd`进行相应的处理。如果不是默认定义好的 `cmd`，则执行默认操作：对于普通文件，调用 `file_ioctl`，对于其他文件调用 `vfs_ioctl`。
 
-```text
+```c
 /*
  * When you add any new common ioctls to the switches above and below
  * please update compat_sys_ioctl() too.
@@ -419,7 +419,7 @@ int do_vfs_ioctl(struct file *filp, unsigned int fd, unsigned int cmd,
 
   对于字符设备驱动程序，最终会调用`vfs_ioctl()`。这里面调用的是 `struct file` 里 `file_operations` 的 `unlocked_ioctl()` 函数。我们前面初始化设备驱动的时候，已经将 `file_operations` 指向设备驱动的 `file_operations` 了。这里调用的是设备驱动的 `unlocked_ioctl`。对于打印机程序来讲，调用的是 `lp_ioctl()`。
 
-```text
+```c
 long vfs_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 {
     int error = -ENOTTY;
@@ -435,7 +435,7 @@ long vfs_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 
   打印机的`lp_do_ioctl()`主要逻辑也是针对`cmd`采用`switch()`语句分情况进行处理。主要包括使用`LP_XXX()`宏定义赋值标记位和调用`copy_to_user()`将用户想得到的信息返回给用户态。
 
-```text
+```c
 static int lp_do_ioctl(unsigned int minor, unsigned int cmd,
     unsigned long arg, void __user *argp)
 {
@@ -467,11 +467,11 @@ static int lp_do_ioctl(unsigned int minor, unsigned int cmd,
 }
 ```
 
-### 总结
+## 总结
 
   本文简单介绍了设备驱动程序的结构，并在此基础上介绍了字符设备从创建到打开、写入以及控制的整个流程。
 
-### 源码资料
+## 源码资料
 
 \[1\] [lp.c](https://code.woboq.org/linux/linux/drivers/char/lp.c.html)
 
@@ -479,7 +479,7 @@ static int lp_do_ioctl(unsigned int minor, unsigned int cmd,
 
 \[3\] [ioctl](https://code.woboq.org/linux/linux/fs/ioctl.c.html#39)
 
-### 参考资料
+## 参考资料
 
 \[1\] wiki
 

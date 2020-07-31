@@ -1,14 +1,14 @@
 # 信号
 
-### 一. 前言
+## 一. 前言
 
   众所周知，[`System V IPC`](https://en.wikipedia.org/wiki/UNIX_System_V)进程间通信机制体系中有着多种多样的进程间通信方式，如管道和有名管道，消息队列，信号，共享内存和信号量，套接字。从本文开始我们就逐个剖析进程间通信的机制和底层原理，就从信号开始讲起吧。
 
-### 二. 信号基本知识
+## 二. 信号基本知识
 
   信号是进程处理紧急情况所用的一种方式，它没有特别复杂的数据结构，就是用一个代号一样的数字。Linux 提供了几十种信号，分别代表不同的意义。我们可以通过`kill -l`命令查看信号。
 
-```text
+```c
 # kill -l
  1) SIGHUP       2) SIGINT       3) SIGQUIT      4) SIGILL       5) SIGTRAP
  6) SIGABRT      7) SIGBUS       8) SIGFPE       9) SIGKILL     10) SIGUSR1
@@ -27,7 +27,7 @@
 
   信号可以在任何时候发送给某一进程，进程需要为这个信号配置信号处理函数。当某个信号发生的时候，就默认执行这个函数就可以了。通过`man 7 signal`可以查看各个信号的具体含义和对应的处理方法
 
-```text
+```c
 Signal     Value     Action   Comment
 ──────────────────────────────────────────────────────────────────────
 SIGHUP        1       Term    Hangup detected on controlling terminal
@@ -55,7 +55,7 @@ SIGUSR2   31,12,17    Term    User-defined signal 2
 * 捕捉信号。我们可以为信号定义一个信号处理函数。当信号发生时，我们就执行相应的信号处理函数。
 * 忽略信号。当我们不希望处理某些信号的时候，就可以忽略该信号，不做任何处理。**有两个信号是应用进程无法捕捉和忽略的，即 `SIGKILL` 和 `SEGSTOP`**，它们用于在任何时候中断或结束某一进程。
 
-### 三. 信号和中断
+## 三. 信号和中断
 
   信号和[中断](https://ty-chen.github.io/linux-kernel-interrupt/)有着诸多相似之处：
 
@@ -67,11 +67,11 @@ SIGUSR2   31,12,17    Term    User-defined signal 2
 * 中断和信号都可能源于硬件和软件，但是中断处理函数注册于内核之中，由内核中运行，而信号的处理函数注册于用户态，内核收到信号后会根据当前任务`task_struct`结构体中的信号相关数据结构找寻对应的处理函数并最终在用户态处理
 * 中断作用于内核全局，而信号作用于当前任务（进程）。即信号影响的往往是一个进程，而中断处理如果出现问题则会导致整个Linux内核的崩溃
 
-### 四. 注册信号处理函数
+## 四. 注册信号处理函数
 
   有些时候我们希望能够让信号运行一些特殊功能，所以有了自定义的信号处理函数。注册`API`主要有`signal()`和`sigaction()`两个，其中`sigaction()`比较推荐使用。
 
-```text
+```c
 typedef void (*sighandler_t)(int);
 sighandler_t signal(int signum, sighandler_t handler);
 ​
@@ -88,7 +88,7 @@ int sigaction(int signum, const struct sigaction *act,
 
   `sa_restorer`保存的是`sa_handler` 执行完毕之后，马上要执行的函数，即下一个函数地址的位置。
 
-```text
+```c
 struct sigaction {
     __sighandler_t sa_handler;
     unsigned long sa_flags;
@@ -99,7 +99,7 @@ struct sigaction {
 
   `sigaction()`也是`glibc`封装的函数，最终系统调用为`rt_sigaction()`。该函数首先将用户态的 `struct sigaction` 结构拷贝为内核态的 `k_sigaction`，然后调用 `do_sigaction()`设置对应的信号处理动作。
 
-```text
+```c
 SYSCALL_DEFINE4(rt_sigaction, int, sig,
     const struct sigaction __user *, act,
     struct sigaction __user *, oact,
@@ -126,7 +126,7 @@ out:
 
   `do_sigaction()`会将用户层传来的信号处理函数赋值给当前任务`task_struct currrent`对应的`sighand->action[]`数组中`sig`信号对应的位置，以用于之后调用。
 
-```text
+```c
 int do_sigaction(int sig, struct k_sigaction *act, struct k_sigaction *oact)
 {
     struct task_struct *p = current, *t;
@@ -150,7 +150,7 @@ int do_sigaction(int sig, struct k_sigaction *act, struct k_sigaction *oact)
 }
 ```
 
-### 五. 发送信号
+## 五. 发送信号
 
   信号发送来源广泛，有可能来自于用户态，有可能来自于硬件，也有可能来自于内核。
 
@@ -160,7 +160,7 @@ int do_sigaction(int sig, struct k_sigaction *act, struct k_sigaction *oact)
 
   不论通过`kill`或者`sigqueue`系统调用还是通过`tkill`或者`tgkill`发送指定线程的信号，其最终调用的均是`do_send_sig_info()`函数，其调用链如下所示
 
-```text
+```c
 kill()->kill_something_info()->kill_pid_info()->group_send_sig_info()->do_send_sig_info()
     
 tkill()->do_tkill()->do_send_specific()->do_send_sig_info()
@@ -177,7 +177,7 @@ rt_sigqueueinfo()->do_rt_sigqueueinfo()->kill_proc_info()->kill_pid_info()->grou
 * 调用`__sigqueue_alloc()` 分配一个 `struct sigqueue` 对象，然后通过 `list_add_tail` 挂在 `struct sigpending` 里面的链表上。
 * 调用 `complete_signal()`分配线程处理该信号
 
-```text
+```c
 int do_send_sig_info(int sig, struct kernel_siginfo *info, struct task_struct *p,
             enum pid_type type)
 {
@@ -262,7 +262,7 @@ ret:
 
   这里之所以会出现信号丢失，是因为这些信号可能会频繁快速出现。这样信号能够处理多少，和信号处理函数什么时候被调用，信号多大频率被发送，都有关系，而信号处理函数的调用时间也是不确定的，因此这种信号称之为不可靠信号。与之相对的，其他信号称之为可靠信号，支持排队执行。
 
-```text
+```c
 static inline int legacy_queue(struct sigpending *signals, int sig)
 {
     return (sig < SIGRTMIN) && sigismember(&signals->signal, sig);
@@ -280,7 +280,7 @@ static inline int legacy_queue(struct sigpending *signals, int sig)
 * 如果没找到并且该信号为非常重要的信号如`SIGKILL`，则强行关闭当前线程
 * 调用`signal_wake_up()`唤醒线程
 
-```text
+```c
 static void complete_signal(int sig, struct task_struct *p, enum pid_type type)
 {
     struct signal_struct *signal = p->signal;
@@ -364,7 +364,7 @@ static void complete_signal(int sig, struct task_struct *p, enum pid_type type)
 
   进程/线程的唤醒和[任务调度](https://ty-chen.github.io/linux-kernel-schedule/)一样最终会调用 `try_to_wake_up()` ，具体逻辑就不重复分析了。如果 wake\_up\_state 返回 0，说明进程或者线程已经是 TASK\_RUNNING 状态了，如果它在另外一个 CPU 上运行，则调用 kick\_process 发送一个处理器间中断，强制那个进程或者线程重新调度，重新调度完毕后，会返回用户态运行。
 
-```text
+```c
 static inline void signal_wake_up(struct task_struct *t, bool resume)
 {
     signal_wake_up_state(t, resume ? TASK_WAKEKILL : 0);
@@ -385,7 +385,7 @@ void signal_wake_up_state(struct task_struct *t, unsigned int state)
 }
 ```
 
-### 六. 信号的处理
+## 六. 信号的处理
 
   这里我们以一个从`tap` 网卡中读取数据的例子来分析信号的处理逻辑。这部分涉及到了[系统调用](https://ty-chen.github.io/linux-kernel-system-call/)、[任务调度](https://ty-chen.github.io/linux-kernel-schedule/)、[中断](https://ty-chen.github.io/linux-kernel-interrupt/)等知识，对前面的文章也算是一个回顾。从网卡读取数据会通过系统调用进入内核，之后通过函数调用表找到对应的函数执行。在读的过程中，如果没有数据处理则会调用`schedule()`函数主动让出CPU进入休眠状态并等待再次唤醒。
 
@@ -395,7 +395,7 @@ void signal_wake_up_state(struct task_struct *t, unsigned int state)
 * 可以被中断的系统调用往往是比较慢的调用，并且会因为数据不就绪而通过 `schedule()` 让出 CPU 进入等待状态。在发送信号的时候，我们除了设置这个进程和线程的 `_TIF_SIGPENDING` 标识位之外，还试图唤醒这个进程或者线程，也就是将它从等待状态中设置为 `TASK_RUNNING`。当这个进程或者线程再次运行的时候，会从 `schedule()` 函数中返回，然后再次进入 `while` 循环。由于这个进程或者线程是由信号唤醒的而不是因为数据来了而唤醒的，因而是读不到数据的，但是在 `signal_pending()` 函数中，我们检测到了 `_TIF_SIGPENDING` 标识位，这说明系统调用没有真的做完，于是返回一个错误 `ERESTARTSYS`，然后带着这个错误从系统调用返回。
 * 如果没有信号，则继续调用`schedule()`让出CPU
 
-```text
+```c
 static ssize_t tap_do_read(struct tap_queue *q,
          struct iov_iter *to,
          int noblock, struct sk_buff *skb)
@@ -426,7 +426,7 @@ static ssize_t tap_do_read(struct tap_queue *q,
 
   `schedule()`会在系统调用返回或者中断返回的时刻调用`exit_to_usermode_loop()`，在任务调度中标记位为`_TIF_NEED_RESCHED`，而对于信号来说是`_TIF_SIGPENDING`。
 
-```text
+```c
 static void exit_to_usermode_loop(struct pt_regs *regs, u32 cached_flags)
 {
     while (true) {
@@ -446,7 +446,7 @@ static void exit_to_usermode_loop(struct pt_regs *regs, u32 cached_flags)
 
   `do_signal()`函数会调用 `handle_signal()`，这里主要存在一个问题使得逻辑变得较为复杂：信号处理函数定义于用户态，而调度过程位于内核态。
 
-```text
+```c
 /*
  * Note that 'init' is a special process: it doesn't get signals it doesn't
  * want to handle. Thus you cannot kill init even with a SIGKILL even by
@@ -486,7 +486,7 @@ void do_signal(struct pt_regs *regs)
 
   `handle_signal()`会判断当前是否从系统调用调度而来，当发现错误码为`ERESTARTSYS`的时候就知道这是从一个没有调用完的系统调用返回的，设置系统错误码为`EINTR`。由于此处不会直接返回任务调度前记录的用户态状态，而是进入注册好的信号处理函数，因此需要调用`setup_rt_frame()`构建新的寄存器结构体`pt_regs`。
 
-```text
+```c
 static void
 handle_signal(struct ksignal *ksig, struct pt_regs *regs)
 {
@@ -526,7 +526,7 @@ handle_signal(struct ksignal *ksig, struct pt_regs *regs)
 * 调用`setup_sigcontext()` 里面，将原来的 `pt_regs` 保存在了 `frame` 中的 `uc_mcontext` 里
 * 填充`regs`，将`regs->ip`设置为自定义的信号处理函数`sa_handler`，将栈顶`regs->sp`设置为新栈帧`frame`地址
 
-```text
+```c
 static int
 setup_rt_frame(struct ksignal *ksig, struct pt_regs *regs)
 {
@@ -595,7 +595,7 @@ static int __setup_rt_frame(int sig, struct ksignal *ksig,
 
   `sa_restorer`在`__libc_sigaction()`函数中被赋值为`restore_rt`，实际上调用函数调用`__NR_rt_sigreturn()`
 
-```text
+```c
 RESTORE (restore_rt, __NR_rt_sigreturn)
 
 #define RESTORE(name, syscall) RESTORE2 (name, syscall)
@@ -612,7 +612,7 @@ asm                                     \
 
   `__NR_rt_sigreturn()`对应的内核函数为`sys_rt_sigreturn()`，这里会调用`restore_sigframe()`将`pt_regs`恢复成原进程的栈帧状态，从而继续执行函数调用后续的内容。
 
-```text
+```c
 asmlinkage int sys_rt_sigreturn(struct pt_regs *regs)
 {
     struct rt_sigframe __user *frame;
@@ -639,7 +639,7 @@ badframe:
 }
 ```
 
-### 总结
+## 总结
 
   信号的发送与处理是一个复杂的过程，这里来总结一下。
 
@@ -666,7 +666,7 @@ badframe:
 
 ![img](https://static001.geekbang.org/resource/image/3d/fb/3dcb3366b11a3594b00805896b7731fb.png)
 
-### 源码资料
+## 源码资料
 
 \[1\] [sigaction](https://code.woboq.org/userspace/glibc/sysdeps/unix/sysv/linux/bits/sigaction.h.html#sigaction)
 
@@ -674,7 +674,7 @@ badframe:
 
 \[3\] [do\_signal\(\)](https://code.woboq.org/linux/linux/arch/x86/kernel/signal.c.html#do_signal)
 
-### 参考资料
+## 参考资料
 
 \[1\] wiki
 

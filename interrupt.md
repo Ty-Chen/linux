@@ -1,10 +1,10 @@
 # 中断
 
-### 一. 前言
+## 一. 前言
 
   在前面的文章里，我们多次见到了中断的作用，如任务调度，系统调用从用户态陷入内核，文件系统的读写操作等。本文就Linux的中断机制进行较为全面的剖析。
 
-### 二. 什么是中断
+## 二. 什么是中断
 
   中断通常被定义为改变处理器执行指令的顺序的一个事件，该事件与CPU芯片内外部硬件电路产生的电信号相对应。中断通常分为同步中断和异步中断：
 
@@ -29,11 +29,11 @@
 
 ![img](https://static001.geekbang.org/resource/image/dd/13/dd492efdcf956cb22ce3d51592cdc113.png)
 
-### 三. 中断结构体
+## 三. 中断结构体
 
   对于每一个中断，我们都有一个对应的描述结构体`irq_desc`，其中包括了众多描述该中断特点的成员变量，这里尤其需要强调描述该中断对应的全部动作的变量`struct irqaction *action`。
 
-```text
+```c
 struct irq_desc {
     struct irq_common_data  irq_common_data;
     struct irq_data     irq_data;
@@ -57,7 +57,7 @@ struct irq_desc {
 
   一连串的动作通过链表的形式组合起来构成了该中断的所有动作。
 
-```text
+```c
 /**
  * struct irqaction - per interrupt action descriptor
  * @handler:    interrupt handler function
@@ -93,7 +93,7 @@ struct irqaction {
 
   众多的中断`irq_desc`则采取类似于内存管理中所用到的基数树radix tree的方式进行管理。这种结构对于从某个整型 key 找到 value 速度很快，中断信号 `irq` 是这个整数。通过它，我们很快就能定位到对应的 `irq_desc`。
 
-```text
+```c
 #ifdef CONFIG_SPARSE_IRQ
 static RADIX_TREE(irq_desc_tree, GFP_KERNEL);
 struct irq_desc *irq_to_desc(unsigned int irq)
@@ -112,7 +112,7 @@ struct irq_desc *irq_to_desc(unsigned int irq)
 #endif /* !CONFIG_SPARSE_IRQ */
 ```
 
-### 四. 中断流程
+## 四. 中断流程
 
   我们从 CPU 收到中断向量开始分析.CPU收到的中断向量定义于[`irq_vectors.h`](https://code.woboq.org/linux/linux/arch/x86/include/asm/irq_vectors.h.html)。下面这一段是该头文件的注释，详细描述了IRQ向量的基本信息：
 
@@ -125,7 +125,7 @@ struct irq_desc *irq_to_desc(unsigned int irq)
   * `INVALIDATE_TLB_VECTOR_START`至255作为特殊中断
 * 64位架构下每个CPU有独立的IDT表，而32位则共享一张表
 
-```text
+```c
 /*
  * Linux IRQ vector layout.
  *
@@ -156,7 +156,7 @@ struct irq_desc *irq_to_desc(unsigned int irq)
 
   在[前文](https://ty-chen.github.io/linux-kernel-zero-process/#more)中有分析内核的开始源于`start_kernel()`，而中断部分则开始于其中的`trap_init()`，这里会填写IDT描述符构成中断向量表
 
-```text
+```c
 void __init trap_init(void)
 {
     /* Init cpu_entry_area before IST entries are set up */
@@ -182,7 +182,7 @@ void __init trap_init(void)
 
   在`idt_setup_traps()`中会初始化中断，其中前32个中断以枚举形式定义在`arch/x86/include/asm/traps.h`中
 
-```text
+```c
 /* Interrupts/Exceptions */
 enum {
     X86_TRAP_DE = 0,    /*  0, Divide-by-zero */
@@ -211,7 +211,7 @@ enum {
 
   `idt_setup_traps()`实际调用`idt_setup_from_table()`，其参数为两个默认中断向量表，值和上面枚举值相同。
 
-```text
+```c
 /**
  * idt_setup_traps - Initialize the idt table with default traps
  */
@@ -274,7 +274,7 @@ static const __initconst struct idt_data def_idts[] = {
 
   在 `start_kernel()` 调用完毕 `trap_init()` 之后，还会调用 `init_IRQ()` 来初始化其他的设备中断，最终会调用到 `native_init_IRQ()`。这里面从第 32 个中断开始，到最后 `NR_VECTORS` 为止，对于 `used_vectors` 中没有标记为 1 的位置，都会调用 `set_intr_gate()` 设置中断向量表。`used_vectors` 中没有标记为 1 的，都是设备中断的部分，也即所有的设备中断的中断处理函数在中断向量表里面都会设置为从 `irq_entries_start` 开始，偏移量为 `i - FIRST_EXTERNAL_VECTOR` 的一项。
 
-```text
+```c
 void __init init_IRQ(void)
 {
     int i;
@@ -312,7 +312,7 @@ void __init native_init_IRQ(void)
 
   中断处理函数定义在 `irq_entries_start` 表里，在 `arch\x86\entry\entry_32.S` 和 `arch\x86\entry\entry_64.S` 都能找到这个函数表的定义。这里面定义了 `FIRST_SYSTEM_VECTOR` 到 `FIRST_EXTERNAL_VECTOR` 项。每一项都是中断处理函数，会跳到 `common_interrupt()` 去执行，并最终调用 `do_IRQ()`，调用完毕后，就从中断返回。
 
-```text
+```c
 ENTRY(irq_entries_start)
     vector=FIRST_EXTERNAL_VECTOR
     .rept (FIRST_SYSTEM_VECTOR - FIRST_EXTERNAL_VECTOR)
@@ -341,7 +341,7 @@ retint_kernel:
 
   `do_IRQ()`从 AX 寄存器里面拿到了中断向量 vector，但是别忘了中断控制器发送给每个 CPU 的中断向量都是每个 CPU 局部的，而抽象中断处理层的虚拟中断信号 `irq` 以及它对应的中断描述结构 `irq_desc` 是全局的，也即这个 CPU 的 200 号的中断向量和另一个 CPU 的 200 号中断向量对应的虚拟中断信号 `irq` 和中断描述结构 `irq_desc` 可能不一样，这就需要一个映射关系。这个映射关系放在 `Per CPU` 变量 `vector_irq` 里面。
 
-```text
+```c
 /*
  * do_IRQ handles all normal device IRQ's (the special
  * SMP cross-CPU interrupts have their own specific
@@ -368,7 +368,7 @@ DECLARE_PER_CPU(vector_irq_t, vector_irq);
 
   在系统初始化的时候，我们会调用 `__assign_irq_vector()`，将虚拟中断信号 `irq` 分配到某个 CPU 上的中断向量。一旦找到某个向量，就调用`irq_to_desc(irq)`将 CPU 此向量对应的向量描述结构 `irq_desc`设置为虚拟中断信号 `irq` 对应的向量描述结构 。 `do_IRQ()` 会根据中断向量 vector 得到对应的 中断`irq`，然后调用 `handle_irq()`。`handle_irq()` 会调用 `generic_handle_irq_desc()`，最终调用 该中断`irq`绑定的处理函数 `handle_irq()`。
 
-```text
+```c
 bool handle_irq(struct irq_desc *desc, struct pt_regs *regs)
 {
 ......
@@ -388,7 +388,7 @@ static inline void generic_handle_irq_desc(struct irq_desc *desc)
 
   `handle_irq()`函数最终会调用`__handle_irq_event_percpu()`，`__handle_irq_event_percpu()` 里面调用了 `irq_desc ()`里每个 ha`n`der，这些 `hander` 是我们在所有 `action` 列表中注册的，这才是我们设置的那个中断处理函数。如果返回值是 `IRQ_HANDLED`，就说明处理完毕；如果返回值是 `IRQ_WAKE_THREAD` 就唤醒线程。至此，中断的整个过程就结束了。
 
-```text
+```c
 irqreturn_t __handle_irq_event_percpu(struct irq_desc *desc, unsigned int *flags)
 {
     irqreturn_t retval = IRQ_NONE;
@@ -415,11 +415,11 @@ irqreturn_t __handle_irq_event_percpu(struct irq_desc *desc, unsigned int *flags
 }
 ```
 
-### 总结
+## 总结
 
   本文大致分析了中断的整个流程，由此我们可以了解到中断结构体，注册机制以及如何生效并触发对应的中断处理函数。
 
-### 源码资料
+## 源码资料
 
 \[1\] [irq\_desc](https://code.woboq.org/linux/linux/include/linux/irqdesc.h.html#irq_desc)
 
@@ -427,7 +427,7 @@ irqreturn_t __handle_irq_event_percpu(struct irq_desc *desc, unsigned int *flags
 
 \[3\] [init\_IRQ\(\)](https://code.woboq.org/linux/linux/arch/x86/kernel/irqinit.c.html#init_IRQ)
 
-### 参考资料
+## 参考资料
 
 \[1\] wiki
 

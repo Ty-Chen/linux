@@ -1,10 +1,10 @@
 # 块设备
 
-### 一. 前言
+## 一. 前言
 
   上文我们分析了字符设备，本文接着分析块设备。我们首先分析块设备的基本结构体，然后分析块设备生成、加载的整个过程，最后分析块设备的直接I/O访问和缓存I/O访问。
 
-### 二. 块设备基本结构体
+## 二. 块设备基本结构体
 
   上文中我们分析了字符设备驱动程序的抽象结构体`cdev`和管理`cdev`的结构体`cdev_map`，在块设备中会相对复杂一些，因为涉及到一个概念：伪文件系统`bdevfs`。在此之下主要有三个结构体：对块设备或设备分区的抽象结构体`block_device`，对磁盘的通用描述`gendisk`以及磁盘分区描述`hd_struct`。其中`block_device`和`hd_struct`一一互相关联，而`gendisk`统一管理众多`hd_struct`。当虚拟文件系统需要使用该块设备时，则会利用`block_device`去`gendisk`中寻找对应的`hd_struct`从而实现读写等访问操作。除了这三个结构体以外，同字符设备驱动一样，块设备也有对`gendisk`的管理结构体`bdev_map`，同样是`kobj_map`结构体。
 
@@ -12,7 +12,7 @@
 
   `bdevfs`对应的超级块名为`blockdev_superblock`，初始化工作在系统初始化时调用`bdev_cache_init()`完成。所有表示块设备的 `inode` 都保存在伪文件系统 `bdevfs` 中以方便块设备的管理。Linux 将块设备的 `block_device` 和 `bdev` 文件系统的块设备的 `inode`通过 `struct bdev_inode` 进行关联。
 
-```text
+```c
 struct super_block *blockdev_superblock __read_mostly;
 ​
 static struct file_system_type bd_type = { 
@@ -46,7 +46,7 @@ struct bdev_inode {
 
   下面先看看`block_device`结构体，其实和`char_device`有很多相似之处，如设备号`bd_dev`，打开用户数统计`bd_openers`等，从这里可以看到块设备的抽象结构体会直接和超级块以及对应的特殊`inode`关联，而且和`hd_struct`一一关联。其中`bd_disk`指向对应的磁盘`gendisk`，需要使用时通过`hd_struct`获取对应的磁盘分区信息并使用，请求队列`bd_queue`会传递给`gendisk`。
 
-```text
+```c
 struct block_device {
     dev_t           bd_dev;  /* not a kdev_t - it's a search key */
     int         bd_openers;
@@ -70,7 +70,7 @@ struct block_device {
 
   `gendisk`代表通用磁盘抽象，`major` 是主设备号，`first_minor` 表示第一个分区的从设备号，`minors` 表示分区的数目。`disk_name` 给出了磁盘块设备的名称。`struct disk_part_tbl` 结构里是一个 `struct hd_struct` 的数组，用于表示各个分区。`struct block_device_operations fops` 指向对于这个块设备的各种操作。`struct request_queue queue` 表示在这个块设备上的请求队列。所有的块设备，不仅仅是硬盘 `disk`，都会用一个 `gendisk` 来表示，然后通过调用链 `add_disk()->device_add_disk()->blk_register_region()`，将 `dev_t` 和一个 `gendisk` 关联起来并保存在 `bdev_map` 中。
 
-```text
+```c
 struct gendisk {
     /* major, first_minor and minors are input parameters only,
      * don't use directly.  Use disk_devt() and disk_max_parts().
@@ -131,7 +131,7 @@ void blk_register_region(dev_t devt, unsigned long range, struct module *module,
 
   `struct hd_struct` 表示磁盘的某个分区。在 `hd_struct` 中，比较重要的成员变量保存了如下的信息：从磁盘的哪个扇区开始，到哪个扇区结束，磁盘分区信息，引用数等。
 
-```text
+```c
 struct hd_struct {
     sector_t start_sect;
     /*
@@ -157,11 +157,11 @@ struct hd_struct {
 
   理清了块设备中的关键结构体之间的关系后，我们按照和字符设备一样的顺序来分析块设备的工作原理和工作流程，首先分析块设备的挂载，接着分析块设备的打开，最后分析块设备的操作，包括直接I/O访问和带缓存的I/O访问。
 
-### 三. 块设备队列结构
+## 三. 块设备队列结构
 
   在上节中我们提到了`block_device`中的成员变量`struct request_queue *bd_queue`会传递给`gendisk`，该请求队列用于接收并处理来自用户发起的I/O请求。在每个块设备的驱动程序初始化的时候会生成一个 `request_queue`。这里会以一个列表的方式存储众多的结构体`request`，每一个`request`对应一个请求。这里还有两个重要的函数，一个是 `make_request_fn()` 函数，用于生成 `request`；另一个是 `request_fn()` 函数，用于处理 `request`。
 
-```text
+```c
 struct request_queue {
     /*
      * Together with queue_head for cacheline sharing
@@ -188,7 +188,7 @@ struct request {
 
   在`request`结构体中最重要的是`bio`结构体，在 `bio` 中`bi_next` 是链表中的下一项，`struct bio_vec` 指向一组页面。
 
-```text
+```c
 struct bio {
     struct bio    *bi_next;  /* request queue link */
     struct block_device  *bi_bdev;
@@ -211,11 +211,11 @@ struct bio_vec {
 
 ![img](https://static001.geekbang.org/resource/image/3c/0e/3c473d163b6e90985d7301f115ab660e.jpeg)
 
-### 四. 请求队列的初始化
+## 四. 请求队列的初始化
 
   以 `scsi` 驱动为例。在初始化设备驱动的时候，会调用 `scsi_alloc_queue()`，把 `request_fn()` 设置为 `scsi_request_fn()`。同时还会调用 `blk_init_allocated_queue()->blk_queue_make_request()`，把 `make_request_fn()` 设置为 `blk_queue_bio()`。
 
-```text
+```c
 /**
  * scsi_alloc_sdev - allocate and setup a scsi_Device
  * @starget: which target to allocate a &scsi_device for
@@ -270,7 +270,7 @@ struct request_queue *scsi_alloc_queue(struct scsi_device *sdev)
 
   在 `blk_init_allocated_queue()` 中，除了初始化 `make_request_fn()` 函数，还要做一件很重要的事情，就是初始化 I/O 的电梯算法。
 
-```text
+```c
 int blk_init_allocated_queue(struct request_queue *q)
 {
     q->fq = blk_alloc_flush_queue(q, NUMA_NO_NODE, q->cmd_size);
@@ -293,7 +293,7 @@ int blk_init_allocated_queue(struct request_queue *q)
 
   `elevator_init()` 中会根据名称来指定电梯算法，如果没有选择，那就默认使用 `iosched_cfq`。
 
-### 五. 块设备的挂载
+## 五. 块设备的挂载
 
   块设备需要通过挂载才能在合适的位置被用户访问操控，挂载逻辑可以简单的如下描述：
 
@@ -307,7 +307,7 @@ int blk_init_allocated_queue(struct request_queue *q)
 
   下面具体分析每一步过程。块设备和字符设备一样通过`mknod`加载`ko`文件并挂载在`/dev`目录下的文件系统`devtmpfs`中。我们会为这个块设备文件分配一个特殊的 `inode`，这一点和字符设备也是一样的。只不过字符设备走 `S_ISCHR` 这个分支，对应 `inode` 的 `file_operations` 是 `def_chr_fops`；而块设备走 `S_ISBLK` 这个分支，对应的 `inode` 的 `file_operations` 是 `def_blk_fops`。这里要注意，`inode` 里面的 `i_rdev` 被设置成了块设备的设备号 `dev_t`。
 
-```text
+```c
 void init_special_inode(struct inode *inode, umode_t mode, dev_t rdev)
 {
     inode->i_mode = mode;
@@ -326,7 +326,7 @@ void init_special_inode(struct inode *inode, umode_t mode, dev_t rdev)
 
   挂载到某个文件夹下同样采用`mount`系统调用，实际会调用文件系统对应的挂载函数，如`ext4`的挂载函数`ext4_mount()`。这里的`blkdev_get_by_path()`最终实现了`block_device`的查找，而`sget()`完成文件系统超级块的填充。
 
-```text
+```c
 static struct dentry *ext4_mount(struct file_system_type *fs_type, int flags, 
                                  const char *dev_name, void *data)
 { 
@@ -356,7 +356,7 @@ EXPORT_SYMBOL(mount_bdev);
 
   `blkdev_get_by_path()`实际调用`lookup_bdev()`根据设备路径 `/dev/xxx` 得到 `block_device`，接着调用 `blkdev_get()`打开该设备。
 
-```text
+```c
 struct block_device *blkdev_get_by_path(const char *path, fmode_t mode,
                     void *holder)
 {
@@ -376,7 +376,7 @@ struct block_device *blkdev_get_by_path(const char *path, fmode_t mode,
 
   `lookup_bdev()` 这里的 `pathname` 是设备的文件名，例如 `/dev/xxx`。这个文件是在 `devtmpfs` 文件系统中的，`kern_path()` 可以在这个文件系统里面，一直找到它对应的 `dentry`。接下来，`d_backing_inode()` 会获得 `inode`。这个 `inode` 就是那个 `init_special_inode` 生成的特殊 `inode`，接下来`bd_acquire()` 通过这个特殊的 `inode`找到 `struct block_device`。
 
-```text
+```c
 struct block_device *lookup_bdev(const char *pathname)
 {
     struct block_device *bdev;
@@ -394,7 +394,7 @@ struct block_device *lookup_bdev(const char *pathname)
 
   `bd_acquire()`最主要的就是调用 `bdget()`函数，根据特殊`inode`的设备号`i_rdev`去进行查找工作。
 
-```text
+```c
 static struct block_device *bd_acquire(struct inode *inode)
 {
     struct block_device *bdev;
@@ -421,7 +421,7 @@ static struct block_device *bd_acquire(struct inode *inode)
 
   `bdget()`函数根据设备号`dev`在伪文件系统`bdev`中查找对应的`block_device`，这里使用的是`BDEV_I()`，实际上也是常见的`container_of()`。
 
-```text
+```c
 struct block_device *bdget(dev_t dev)
 {
     struct block_device *bdev;
@@ -459,7 +459,7 @@ struct block_device *bdget(dev_t dev)
   * 如果`partno`为0，则说明打开的是整个设备而不是分区，那我们就调用 `disk_get_part()`获取 `gendisk` 中的分区数组，然后调用 `block_device_operations` 里面的 `open()` 函数打开设备。
   * 如果 `partno` 不为 0，也就是说打开的是分区，那我们就调用`bdget_disk()`获取整个设备的 `block_device`，赋值给变量 `struct block_device *whole`，然后调用递归 `__blkdev_get()`，打开 `whole` 代表的整个设备，将 `bd_contains` 设置为变量 `whole`。
 
-```text
+```c
 int blkdev_get(struct block_device *bdev, fmode_t mode, void *holder)
 {
 ......
@@ -529,7 +529,7 @@ static int __blkdev_get(struct block_device *bdev, fmode_t mode, int for_part)
 * `block_device` 是指向整个磁盘设备的。这个时候，我们只需要根据 `dev_t`，在 `bdev_map` 中将对应的 `gendisk` 拿出来就好。
 * `block_device` 是指向某个分区的。这个时候我们要先得到 `hd_struct`，然后通过 `hd_struct`，找到对应的整个设备的 `gendisk`，并且把 `partno` 设置为分区号。
 
-```text
+```c
 /**
  * get_gendisk - get partitioning information for a given device
  * @devt: device to get partitioning information for
@@ -562,7 +562,7 @@ struct gendisk *get_gendisk(dev_t devt, int *partno)
 
   最终的`block_device`的打开调用的`open()`函数定义在驱动层，如在 `drivers/scsi/sd.c` 里面，也就是 `MODULE_DESCRIPTION(“SCSI disk (sd) driver”)`。成功打开设备之后，就会调用`sget()`利用`block_device`填写`super_block`，从而完成挂载。注意，调用 `sget()` 的时候，有一个参数是一个函数 `set_bdev_super()`。这里面将 `block_device` 设置进了 `super_block`。而 `sget` 要做的就是分配一个 `super_block`，然后调用 `set_bdev_super` 这个 `callback` 函数。这里的 `super_block` 是 ext4 文件系统的 `super_block`。
 
-```text
+```c
 static int set_bdev_super(struct super_block *s, void *data)
 {
   s->s_bdev = data;
@@ -629,7 +629,7 @@ struct super_block *sget_userns(struct file_system_type *type,
 
 ![img](https://static001.geekbang.org/resource/image/62/20/6290b73283063f99d6eb728c26339620.png)
 
-### 六. 块设备的访问
+## 六. 块设备的访问
 
   在前文中我们有提到`ext4`文件系统最终调用`ext4_file_write_iter()`，它将I/O调用分为了直接I/O和缓存I/O
 
@@ -638,11 +638,11 @@ struct super_block *sget_userns(struct file_system_type *type,
 
   本节由此开始，分析文件的写入最后在块设备上如何实现。
 
-#### 6.1 直接I/O访问
+### 6.1 直接I/O访问
 
   直接I/O访问从`ext4_direct_IO()`开始，实际会根据读、写类型调用相应的函数。这里我们只分析写函数。
 
-```text
+```c
 static ssize_t ext4_direct_IO(struct kiocb *iocb, struct iov_iter *iter)
 {
 ......
@@ -670,7 +670,7 @@ static ssize_t ext4_direct_IO_write(struct kiocb *iocb, struct iov_iter *iter)
 
    `ext4_direct_IO_write()` 调用 `__blockdev_direct_IO()`，这里的`inode->i_sb->s_bdev`即为我们挂载时填充的`block_device`。`__blockdev_direct_IO()` 会调用 `do_blockdev_direct_IO()`，在这里面我们要准备一个 `struct dio` 结构和 `struct dio_submit` 结构，用来描述将要发生的写入请求。
 
-```text
+```c
 static inline ssize_t
 do_blockdev_direct_IO(struct kiocb *iocb, struct inode *inode,
           struct block_device *bdev, struct iov_iter *iter,
@@ -712,7 +712,7 @@ do_blockdev_direct_IO(struct kiocb *iocb, struct inode *inode,
 
   `do_direct_IO ()`里面有两层循环，第一层循环是依次处理这次要写入的所有块。对于每一块，取出对应的内存中的页 `page`，在这一块中有写入的起始地址 `from` 和终止地址 `to`，所以第二层循环就是依次处理 `from` 到 `to` 的数据，调用 `submit_page_section()`提交到块设备层进行写入。
 
-```text
+```c
 static int do_direct_IO(struct dio *dio, struct dio_submit *sdio,
       struct buffer_head *map_bh)
 {
@@ -754,7 +754,7 @@ static int do_direct_IO(struct dio *dio, struct dio_submit *sdio,
 
   `submit_page_section()` 会调用 `dio_bio_submit()`，进而调用 `submit_bio()` 向块设备层提交数据。其中参数 `struct bio` 是将数据传给块设备的通用传输对象。
 
-```text
+```c
 /**
  * submit_bio - submit a bio to the block device layer for I/O
  * @bio: The &struct bio which describes the I/O
@@ -766,11 +766,11 @@ blk_qc_t submit_bio(struct bio *bio)
 }
 ```
 
-#### 6.2 缓存I/O访问
+### 6.2 缓存I/O访问
 
   缓存I/O调用从`ext4_writepages()`开始，这里首先通过`mpage_prepare_extent_to_map()`完成`bio`的初始化，然后通过`ext4_ion_submit()`提交I/O请求。
 
-```text
+```c
 static int ext4_writepages(struct address_space *mapping,
          struct writeback_control *wbc)
 {
@@ -790,7 +790,7 @@ static int ext4_writepages(struct address_space *mapping,
 
   这里比较重要的一个数据结构是 `struct mpage_da_data`。这里面有文件的 `inode`、要写入的页的偏移量，还有一个重要的 `struct ext4_io_submit`，里面有通用传输对象 `bio`。在 `ext4_writepages()` 中，`mpage_prepare_extent_to_map()` 用于初始化这个 `struct mpage_da_data` 结构，调用链为：`mpage_prepare_extent_to_map()->mpage_process_page_bufs()->mpage_submit_page()->ext4_bio_write_page()->io_submit_add_bh()`。
 
-```text
+```c
 struct mpage_da_data {
     struct inode *inode;
 ......
@@ -812,7 +812,7 @@ struct ext4_io_submit {
 
   在 `io_submit_add_bh()` 中，此时的 `bio` 还是空的，因而我们要调用 `io_submit_init_bio()`初始化 `bio`。
 
-```text
+```c
 static int io_submit_init_bio(struct ext4_io_submit *io,
             struct buffer_head *bh)
 {
@@ -833,7 +833,7 @@ static int io_submit_init_bio(struct ext4_io_submit *io,
 
   `ext4_io_submit()`提交 I/O请求和直接I/O访问一样，也是调用 `submit_bio()`
 
-```text
+```c
 void ext4_io_submit(struct ext4_io_submit *io)
 {
     struct bio *bio = io->io_bio;
@@ -849,7 +849,7 @@ void ext4_io_submit(struct ext4_io_submit *io)
 }
 ```
 
-#### 6.3 访问请求的提交，调度和处理
+### 6.3 访问请求的提交，调度和处理
 
   直接I/O访问和缓存I/O访问殊途同归，都会走到`submit_bio()`提交访问请求，该函数实际调用`generic_make_request()`。由于实际中块设备会分层次，如LVM上创建块设备等，因此这里会采取循环的方式依次从高层次向低层次发起访问请求。
 
@@ -862,7 +862,7 @@ void ext4_io_submit(struct ext4_io_submit *io)
 
   `make_request_fn()` 执行完毕后，可以想象 `bio_list_on_stack[0]`可能又多了一些 `bio` 了，接下来的循环中调用 `bio_list_pop()` 将 `bio_list_on_stack[0]`积攒的 `bio` 拿出来，分别放在两个队列 `lower` 和 `same` 中，顾名思义，`lower` 就是更低层次的块设备的 `bio`，`same` 是同层次的块设备的 `bio`。接下来我们能将 `lower、same` 以及 `bio_list_on_stack[1]` 都取出来，放在 `bio_list_on_stack[0]`统一进行处理。当然应该 `lower` 优先了，因为只有底层的块设备的 I/O 做完了，上层的块设备的 I/O 才能做完。
 
-```text
+```c
 blk_qc_t generic_make_request(struct bio *bio)
 {
     /*
@@ -921,7 +921,7 @@ out:
 
   根据上文请求队列的分析，`make_request_fn()` 函数实际用 `blk_queue_bio()`。`blk_queue_bio()` 首先做的一件事情是调用 `elv_merge()` 来判断，当前这个 `bio` 请求是否能够和目前已有的 `request` 合并起来成为同一批 I/O 操作，从而提高读取和写入的性能。如果没有办法合并，那就调用 `get_request()`创建一个新的 `request`，调用 `blk_init_request_from_bio()`将 `bio` 放到新的 `request` 里面，然后调用 `add_acct_request()`把新的 `request` 加到 `request_queue` 队列中。
 
-```text
+```c
 static blk_qc_t blk_queue_bio(struct request_queue *q, struct bio *bio)
 {
     struct request *req, *free;
@@ -974,7 +974,7 @@ elv\_merge 尝试了三次合并。
 * 如果和上一个合并过的 `request` 无法合并，则调用 `elv_rqhash_find()`按照 `bio` 的起始地址查找 `request`，看有没有能够合并的。如果有的话，因为是按照起始地址找的，应该接在其后面，所以是 `ELEVATOR_BACK_MERGE`。
 * 如果依然找不到，则调用 `elevator_merge_fn()` 按照 `bio` 的结束地址试图合并。对于 `iosched_cfq`，调用的是 `cfq_merge()`。在这里面`cfq_find_rq_fmerge()` 会调用 `elv_rb_find()` 函数。如果有的话，因为是按照结束地址找的，应该接在其前面，所以是 `ELEVATOR_FRONT_MERGE`。
 
-```text
+```c
 enum elv_merge elv_merge(struct request_queue *q, struct request **req,
     struct bio *bio)
 {
@@ -1050,7 +1050,7 @@ cfq_find_rq_fmerge(struct cfq_data *cfqd, struct bio *bio)
 
   设备驱动程序往设备里面写，调用的是请求队列 `request_queue` 的另外一个函数 `request_fn()`。对于 `scsi` 设备来讲，调用的是 `scsi_request_fn()`。在这里面是一个 for 无限循环，从 `request_queue` 中读取 `request`，然后封装更加底层的指令，给设备控制器下指令实施真正的 I/O 操作。
 
-```text
+```c
 static void scsi_request_fn(struct request_queue *q)
   __releases(q->queue_lock)
   __acquires(q->queue_lock)
@@ -1094,11 +1094,11 @@ static void scsi_request_fn(struct request_queue *q)
 }
 ```
 
-### 总结
+## 总结
 
   本文详细叙述了块设备的基本结构体以及块设备从挂载到访问的全部过程，由此可以对块设备有一个全面的了解。
 
-### 源码资料
+## 源码资料
 
 \[1\] [block\_device](https://code.woboq.org/linux/linux/include/linux/fs.h.html#block_device)
 
@@ -1110,7 +1110,7 @@ static void scsi_request_fn(struct request_queue *q)
 
 \[5\] [ext4\_direct\_IO](https://code.woboq.org/linux/linux/fs/ext4/inode.c.html#ext4_direct_IO)
 
-### 参考资料
+## 参考资料
 
 \[1\] wiki
 

@@ -1,16 +1,14 @@
 # 管道
 
-### 一. 前言
+## 一. 前言
 
   上文中我们介绍了进程间通信的方法之一：信号，本文将继续介绍另一种进程间通信的方法，即管道。管道是Linux中使用`shell`经常用到的一个技术，本文将深入剖析管道的实现和运行逻辑。
 
-&lt;!-- more--&gt;
-
-### 二. 管道简介
+## 二. 管道简介
 
   在Linux的日常使用中，我们常常会用到管道，如下所示
 
-```text
+```bash
 ps -ef | grep 关键字 | awk '{print $2}' | xargs kill -9
 ```
 
@@ -18,35 +16,35 @@ ps -ef | grep 关键字 | awk '{print $2}' | xargs kill -9
 
   管道分为两种类型，`|` 表示的管道称为匿名管道，意思就是这个类型的管道没有名字，用完了就销毁了。就像上面那个命令里面的一样，竖线代表的管道随着命令的执行自动创建、自动销毁。用户甚至都不知道自己在用管道这种技术，就已经解决了问题。另外一种类型是命名管道。这个类型的管道需要通过 `mkfifo` 命令显式地创建。
 
-```text
+```bash
 mkfifo hello
 ```
 
   我们可以往管道里面写入东西。例如，写入一个字符串。
 
-```text
-# echo "hello world" > hello
+```bash
+echo "hello world" > hello
 ```
 
   这个时候管道里面的内容没有被读出，这个命令就会停在这里。这个时候，我们就需要重新连接一个终端。在终端中用下面的命令读取管道里面的内容：
 
-```text
-# cat < hello hello world
+```bash
+cat < hello hello world
 ```
 
   一方面，我们能够看到，管道里面的内容被读取出来，打印到了终端上；另一方面，echo 那个命令正常退出了。这就是有名管道的执行流程。
 
-### 三. 匿名管道创建
+## 三. 匿名管道创建
 
   实际管道的创建调用的是系统调用`pipe()`，该函数建了一个管道 `pipe`，返回了两个文件描述符，这表示管道的两端，一个是管道的读取端描述符 `fd[0]`，另一个是管道的写入端描述符 `fd[1]`。
 
-```text
+```c
 int pipe(int fd[2])
 ```
 
   其内核实现如下所示，`pipe2 ()`调用 `__do_pipe_flags()` 创建一个数组 files来存放管道的两端的打开文件，另一个数组 `fd` 存放管道的两端的文件描述符。如果 `__do_pipe_flags()` 没有错误，那就调用 `fd_install()`将两个 `fd` 和两个 `struct file` 关联起来，这一点和打开一个文件的过程类似。
 
-```text
+```c
 SYSCALL_DEFINE1(pipe, int __user *, fildes)
 {
     return sys_pipe2(fildes, 0);
@@ -74,7 +72,7 @@ SYSCALL_DEFINE2(pipe2, int __user *, fildes, int, flags)
 
   `__do_pipe_flags()`调用了`create_pipe_files()`生成`fd`，然后调用`get_unused_fd_flags()`赋值`fdr`和`fdw`，即读文件描述符和写文件描述符。由此也可以看出管道的特性：由一端写入，由另一端读出。
 
-```text
+```c
 static int __do_pipe_flags(int *fd, struct file **files, int flags)
 {
     int error;
@@ -98,7 +96,7 @@ static int __do_pipe_flags(int *fd, struct file **files, int flags)
 
   `create_pipe_files()`是管道创建的关键逻辑，从这里可以看出来管道实际上也是一种抽象的文件系统`pipefs`，有着对应的特殊文件以及`inode`。这里首先通过`get_pipe_inode()`获取特殊`inode`，然后调用`alloc_file_pseudo()`通过`inode`以及对应的挂载结构体`pipe_mnt`，文件操作结构体`pipefifo_fops`创建关联的`dentry`并以此创建文件结构体并分配内存，通过`alloc_file_clone()`创建一份新的`file`后将两个文件分别保存在`res[0]`和`res[1]`中。
 
-```text
+```c
 int create_pipe_files(struct file **res, int flags)
 {
     struct inode *inode = get_pipe_inode();
@@ -129,7 +127,7 @@ int create_pipe_files(struct file **res, int flags)
 
   其虚拟文件系统`pipefs`对应的结构体和操作如下：
 
-```text
+```c
 static struct file_system_type pipe_fs_type = {
   .name    = "pipefs",
   .mount    = pipefs_mount,
@@ -183,7 +181,7 @@ static struct inode * get_pipe_inode(void)
 
   至此，一个匿名管道就创建成功了。如果对于 `fd[1]`写入，调用的是 `pipe_write()`，向 `pipe_buffer` 里面写入数据；如果对于 `fd[0]`的读入，调用的是 `pipe_read()`，也就是从 `pipe_buffer` 里面读取数据。至此，我们在一个进程内创建了管道，但是尚未实现进程间通信。
 
-### 四. 匿名管道通信
+## 四. 匿名管道通信
 
   在上文中我们提到了匿名管道通过`|`符号实现进程间的通信，传递输入给下一个进程作为输出，其实现原理如下：
 
@@ -195,7 +193,7 @@ static struct inode * get_pipe_inode(void)
 
   接着我们需要调用`dup2()`实现输入输出和管道两端的关联，该函数会将`fd`赋值给`fd2`
 
-```text
+```c
 /* Duplicate FD to FD2, closing the old FD2 and making FD2 be
    open the same file as FD is.  Return FD2 or -1.  */
 int
@@ -216,7 +214,7 @@ __dup2 (int fd, int fd2)
 
   在 `files_struct` 里面，有这样一个表，下标是 `fd`，内容指向一个打开的文件 `struct file`。在这个表里面，前三项是定下来的，其中第零项 `STDIN_FILENO` 表示标准输入，第一项 `STDOUT_FILENO` 表示标准输出，第三项 `STDERR_FILENO` 表示错误输出。
 
-```text
+```c
 struct files_struct {
     struct file __rcu * fd_array[NR_OPEN_DEFAULT];
 }
@@ -229,11 +227,11 @@ struct files_struct {
 
 ![img](https://static001.geekbang.org/resource/image/c0/e2/c042b12de704995e4ba04173e0a304e2.png)
 
-### 五. 有名管道
+## 五. 有名管道
 
 对于有名管道，我们需要通过`mkfifo`创建，实际调用`__xmknod()`函数，最终调用`mknod()`，和字符设备创建一样。
 
-```text
+```c
 /* Create a named pipe (FIFO) named PATH with protections MODE.  */
 int
 mkfifo (const char *path, mode_t mode)
@@ -265,7 +263,7 @@ __xmknod (int vers, const char *path, mode_t mode, dev_t *dev)
 
   接下来，要打开这个管道文件，我们还是会调用文件系统的 `open()` 函数。还是沿着文件系统的调用方式，一路调用到 `pipefifo_fops` 的 `open()` 函数，也就是 `fifo_open()`。在 `fifo_open()` 里面会创建 `pipe_inode_info`，这一点和匿名管道也是一样的。这个结构里面有个成员是 `struct pipe_buffer *bufs`。我们可以知道，所谓的命名管道，其实是也是内核里面的一串缓存。接下来，对于命名管道的写入，我们还是会调用 `pipefifo_fops` 的 `pipe_write()` 函数，向 `pipe_buffer` 里面写入数据。对于命名管道的读入，我们还是会调用 `pipefifo_fops` 的 `pipe_read()`，也就是从 `pipe_buffer` 里面读取数据。
 
-```text
+```c
 static int fifo_open(struct inode *inode, struct file *filp)
 {
     struct pipe_inode_info *pipe;
@@ -364,11 +362,11 @@ static int fifo_open(struct inode *inode, struct file *filp)
 }
 ```
 
-### 总结
+## 总结
 
   无论是匿名管道还是命名管道，在内核都是一个文件。只要是文件就要有一个 `inode`。在这种特殊的 `inode` 里面，`file_operations` 指向管道特殊的 `pipefifo_fops`，这个 `inode` 对应内存里面的缓存。当我们用文件的 `open` 函数打开这个管道设备文件的时候，会调用 `pipefifo_fops` 里面的方法创建 `struct file` 结构，他的 `inode` 指向特殊的 `inode`，也对应内存里面的缓存，`file_operations` 也指向管道特殊的 `pipefifo_fops`。写入一个 `pipe` 就是从 `struct file` 结构找到缓存写入，读取一个 `pipe` 就是从 `struct file` 结构找到缓存读出。匿名管道和命名管道区别就在于匿名管道会通过`dup2()`指定输入输出源，完成之后立即释放，而命名管道通过`mkfifo`创建挂载后，需要手动调用`pipe_read()`和`pipe_write()`来完成其功能，表现到用户端即为前面提到的例子。
 
-### 源码资料
+## 源码资料
 
 \[1\] [\_\_do\_pipe\_flag\(\)](https://code.woboq.org/linux/linux/fs/pipe.c.html#798)
 
@@ -378,7 +376,7 @@ static int fifo_open(struct inode *inode, struct file *filp)
 
 \[4\] [fifo\_open\(\)](https://code.woboq.org/linux/linux/fs/pipe.c.html#897)
 
-### 参考资料
+## 参考资料
 
 \[1\] wiki
 

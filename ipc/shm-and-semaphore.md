@@ -1,10 +1,10 @@
 # 共享内存和信号量
 
-### 一. 前言
+## 一. 前言
 
   本文为进程间通信的最后一篇，介绍共享内存和信号量。之所以将二者一起叙述，是因为二者有着密不可分的关系。共享内存会利用虚拟内存和物理内存的映射关系，让不同进程开辟一块虚拟空间映射到相同的物理内存上，从而实现了两个进程对相同区域的读写，即进程间通信。而信号量则实现了互斥锁，可以为共享内存提供数据一致性的保证，因此二者常结合使用。
 
-### 二. 基础知识
+## 二. 基础知识
 
   共享内存的使用包括
 
@@ -22,11 +22,11 @@
 
 ![img](https://static001.geekbang.org/resource/image/46/0b/469552bffe601d594c432d4fad97490b.png)
 
-### 三. 统一封装的接口
+## 三. 统一封装的接口
 
   消息队列、共享内存和信号量有着统一的封装和管理机制，为此我们提供了对应的名字空间和`ipc_ids`结构体。根据代码中的定义，第 0 项用于信号量，第 1 项用于消息队列，第 2 项用于共享内存，分别可以通过 `sem_ids、msg_ids、shm_ids` 来访问。`ipc_ids`中`in_use` 表示当前有多少个 `ipc`，`seq` 和 `next_id` 用于一起生成 `ipc` 唯一的 `id`，`ipcs_idr` 是一棵基数树，一旦涉及从一个整数查找一个对象它都是最好的选择。
 
-```text
+```c
 struct ipc_namespace {
 ......
     struct ipc_ids  ids[3];
@@ -59,7 +59,7 @@ struct idr {
 
   信号量、消息队列、共享内存的通过基数树来管理各自的对象，三种`ipc`对应的结构体中第一项均为`struct kern_ipc_perm`，该结构体对应的`id`会存储在基数树之中，可以通过`ipc_obtain_object_idr()`获取。
 
-```text
+```c
 struct sem_array {
     struct kern_ipc_perm  sem_perm;  /* permissions .. see ipc.h */
 ......
@@ -87,7 +87,7 @@ struct kern_ipc_perm *ipc_obtain_object_idr(struct ipc_ids *ids, int id)
 
   对于这三种不同的通信方式，会对`ipc_obtain_object_idr()`进行封装
 
-```text
+```c
 static inline struct sem_array *sem_obtain_object(struct ipc_namespace *ns, int id)
 {
     struct kern_ipc_perm *ipcp = ipc_obtain_object_idr(&sem_ids(ns), id);
@@ -111,13 +111,13 @@ static inline struct shmid_kernel *shm_obtain_object(struct ipc_namespace *ns, i
 
 ![img](https://static001.geekbang.org/resource/image/08/af/082b742753d862cfeae520fb02aa41af.png)
 
-### 四. 共享内存的创建和映射
+## 四. 共享内存的创建和映射
 
-#### 4.1 创建共享内存
+### 4.1 创建共享内存
 
   共享内存的创建通过`shmget()`实现。该函数创建对应的`ipc_namespaace`指针并指向该进程的`ipc_ns`，初始化共享内存对应的操作`shm_ops`，并将传参`key, size, shmflg`封装为传参`shm_params`，最终调用`ipcget()`。
 
-```text
+```c
 SYSCALL_DEFINE3(shmget, key_t, key, size_t, size, int, shmflg)
 {
     struct ipc_namespace *ns;
@@ -137,7 +137,7 @@ SYSCALL_DEFINE3(shmget, key_t, key, size_t, size, int, shmflg)
 
   `ipcget()`会根据传参`key`的类型是否是`IPC_PRIVATE`选择调用`ipcget_new()`创建或者调用`ipcget_public()`打开对应的共享内存。
 
-```text
+```c
 int ipcget(struct ipc_namespace *ns, struct ipc_ids *ids,
             const struct ipc_ops *ops, struct ipc_params *params)
 {
@@ -150,7 +150,7 @@ int ipcget(struct ipc_namespace *ns, struct ipc_ids *ids,
 
   `ipcget_new()`会根据定义的`ops->getnew()`创建新的`ipc`对象，即上面定义的`newseg()`。`ipcget_public()`会按照 `key`查找 `struct kern_ipc_perm`。如果没有找到，那就看是否设置了 `IPC_CREAT`，如果设置了，就调用`ops->getnew()`创建一个新的，否则返回错误`ENOENT`。如果找到了，就将对应的 `id` 返回。
 
-```text
+```c
 static int ipcget_new(struct ipc_namespace *ns, struct ipc_ids *ids,
         const struct ipc_ops *ops, struct ipc_params *params)
 {
@@ -202,7 +202,7 @@ static int ipcget_public(struct ipc_namespace *ns, struct ipc_ids *ids,
 * 调用`hugetlb_file_setup()`或`shmem_kernel_file_setup()`关联文件。虚拟地址空间可以和物理内存关联，但是页表的申请条件中会避开已分配的映射，即**物理内存是某个进程独享的**。所以如何实现物理内存向多个进程的虚拟内存映射呢？这里就要靠文件来实现了：虚拟地址空间也可以映射到一个文件，**文件是可以跨进程共享的**。这里我们并不是映射到硬盘上存储的文件，而是映射到**内存文件系统上的文件**。这里定要**注意区分 `shmem` 和 `shm` ，前者是一个文件系统，后者是进程通信机制**。
 * 通过 `ipc_addid()` 将新创建的 `struct shmid_kernel` 结构挂到 `shm_ids` 里面的基数树上，返回相应的 `id`，并且将 `struct shmid_kernel` 挂到当前进程的 `sysvshm` 队列中。
 
-```text
+```c
 /**
  * newseg - Create a new shared memory segment
  * @ns: namespace
@@ -263,7 +263,7 @@ static int newseg(struct ipc_namespace *ns, struct ipc_params *params)
 
   实际上`shmem_kernel_file_setup()`会在`shmem`文件系统里面创建一个文件：`__shmem_file_setup()` 会创建新的 `shmem` 文件对应的 `dentry` 和 `inode`，并将它们两个关联起来，然后分配一个 `struct file` 结构来表示新的 `shmem` 文件，并且指向独特的 `shmem_file_operations`。
 
-```text
+```c
 /**
  * shmem_kernel_file_setup - get an unlinked file living in tmpfs which must be kernel internal.  
  * @name: name for dentry (to be seen in /proc/<pid>/maps
@@ -302,7 +302,7 @@ static struct file *__shmem_file_setup(const char *name, loff_t size,
 }
 ```
 
-#### 4.2 共享内存的映射
+### 4.2 共享内存的映射
 
   从上面的代码解析中我们知道，共享内存的数据结构 `struct shmid_kernel`通过它的成员 `struct file *shm_file`来管理内存文件系统 `shmem` 上的内存文件。无论这个共享内存是否被映射，`shm_file` 都是存在的。
 
@@ -313,7 +313,7 @@ static struct file *__shmem_file_setup(const char *name, loff_t size,
 * 创建`base`的备份文件`file`，指向该内存文件`base`，并将`private_data`保存为`sfd`。在源码中注释部分已经叙述了为什么要再创建一个文件而不是直接使用`base`，简而言之就是`base`是共享内存文件系统`shmem`中的`shm_file`，用于管理内存文件，是一个中立、独立于任何一个进程的文件。新创建的 `struct file` 则专门用于做内存映射。
 * 调用`do_mmap_pgoff()`，分配`vm_area_struct`指向虚拟地址空间中未分配区域，其`vm_file`指向文件`file`，接着调用`shm_file_operations`中的`mmap()`函数，即`shm_mmap()`完成映射。
 
-```text
+```c
 SYSCALL_DEFINE3(shmat, int, shmid, char __user *, shmaddr, int, shmflg)
 { 
     unsigned long ret; 
@@ -396,7 +396,7 @@ long do_shmat(int shmid, char __user *shmaddr, int shmflg,
 
   `shm_mmap()` 中调用了 `shm_file_data` 中的 `file` 的 `mmap()` 函数，这次调用的是 `shmem_file_operations` 的 `mmap`，也即 `shmem_mmap()`。
 
-```text
+```c
 static int shm_mmap(struct file *file, struct vm_area_struct *vma)
 {
     struct shm_file_data *sfd = shm_file_data(file);
@@ -429,7 +429,7 @@ static int shmem_mmap(struct file *file, struct vm_area_struct *vma)
 
   这里`vm_area_struct` 的 `vm_ops` 指向 `shmem_vm_ops`。等从 `call_mmap()` 中返回之后，`shm_file_data` 的 `vm_ops` 指向了 `shmem_vm_ops`，而 `vm_area_struct` 的 `vm_ops` 改为指向 `shm_vm_ops`。
 
-```text
+```c
 static const struct vm_operations_struct shm_vm_ops = {
     .open  = shm_open,  /* callback for a new vm-area open */
     .close  = shm_close,  /* callback for when the vm-area is released */
@@ -446,7 +446,7 @@ static const struct vm_operations_struct shmem_vm_ops = {
 
   `shmem_fault()` 会调用 `shmem_getpage_gfp()` 在 `page cache` 和 `swap` 中找一个空闲页，如果找不到就通过 `shmem_alloc_and_acct_page()` 分配一个新的页，他最终会调用内存管理系统的 `alloc_page_vma` 在物理内存中分配一个页。
 
-```text
+```c
 static int shm_fault(struct vm_fault *vmf)
 {
     struct file *file = vmf->vma->vm_file;
@@ -488,13 +488,13 @@ static int shmem_getpage_gfp(struct inode *inode, pgoff_t index,
 
   至此，共享内存才真的映射到了虚拟地址空间中，进程可以像访问本地内存一样访问共享内存。
 
-### 五. 信号量的创建和使用
+## 五. 信号量的创建和使用
 
-#### 5.1 信号量的创建
+### 5.1 信号量的创建
 
   信号量的创建和共享内存类似，实际调用`semget()`，操作也大同小异：创建对应的`ipc_namespaace`指针并指向该进程的`ipc_ns`，初始化共享内存对应的操作`sem_ops`，并将传参`key, size, semflg`封装为传参`sem_params`，最终调用`ipcget()`。
 
-```text
+```c
 SYSCALL_DEFINE3(semget, key_t, key, int, nsems, int, semflg)
 {
     struct ipc_namespace *ns;
@@ -518,7 +518,7 @@ SYSCALL_DEFINE3(semget, key_t, key, int, nsems, int, semflg)
 * 初始化`sem_array`和`sems`中的各个链表
 * 通过`ipc_addid()`将创建的`sem_array`挂载到基数树上，并返回对应`id`
 
-```text
+```c
 static int newary(struct ipc_namespace *ns, struct ipc_params *params)
 {
     int retval;
@@ -588,11 +588,11 @@ struct sem {
 } ____cacheline_aligned_in_smp;
 ```
 
-#### 5.2 信号量的初始化
+### 5.2 信号量的初始化
 
   信号量通过`semctl()`实现初始化，主要使用`semctl_main()`和`semctl_setval()`函数。
 
-```text
+```c
 SYSCALL_DEFINE4(semctl, int, semid, int, semnum, int, cmd, unsigned long, arg)
 {
     int version;
@@ -625,7 +625,7 @@ SYSCALL_DEFINE4(semctl, int, semid, int, semnum, int, cmd, unsigned long, arg)
 
   `SETALL`操作调用`semctl_main()`，传参为 `union semun` 里面的 `unsigned short *array`，会设置整个信号量集合。`semctl_main()` 函数中，先是通过 `sem_obtain_object_check()`根据信号量集合的 id 在基数树里面找到 `struct sem_array` 对象，发现如果是 `SETALL` 操作，就将用户的参数中的 `unsigned short *array` 通过 `copy_from_user()` 拷贝到内核里面的 `sem_io` 数组，然后是一个循环，对于信号量集合里面的每一个信号量，设置 `semval`，以及修改这个信号量值的 `pid`。
 
-```text
+```c
 static int semctl_main(struct ipc_namespace *ns, int semid, int semnum,
     int cmd, void __user *p)
 {
@@ -669,7 +669,7 @@ static int semctl_main(struct ipc_namespace *ns, int semid, int semnum,
 
    `SETVAL` 操作调用`semctl_setval()`函数，传进来的参数 `union semun` 里面的 `int val`仅仅会设置某个信号量。在 `semctl_setval()` 函数中，我们先是通过 `sem_obtain_object_check()`根据信号量集合的 `id` 在基数树里面找到 `struct sem_array` 对象，对于 `SETVAL` 操作，直接根据参数中的 `val` 设置 `semval`，以及修改这个信号量值的 `pid`。
 
-```text
+```c
 static int semctl_setval(struct ipc_namespace *ns, int semid, int semnum,
     unsigned long arg)
 {
@@ -694,11 +694,11 @@ static int semctl_setval(struct ipc_namespace *ns, int semid, int semnum,
 }
 ```
 
-#### 5.3 信号量的操作
+### 5.3 信号量的操作
 
   信号量的操作通过`semop()`实现，实际调用`sys_emtimedop()`，最终调用为`do_semtimedop()`
 
-```text
+```c
 SYSCALL_DEFINE3(semop, int, semid, struct sembuf __user *, tsops, unsigned, nsops)
 { 
     return sys_semtimedop(semid, tsops, nsops, NULL);
@@ -715,7 +715,7 @@ SYSCALL_DEFINE3(semop, int, semid, struct sembuf __user *, tsops, unsigned, nsop
 * 如果需要等待，则会根据信号量操作是对单个信号量还是整个信号量集合，将`queue`挂载至信号量链表`pending_alter`或者信号量集合的链表`pending_alter`中
   * 进入`do-while`循环等待，如果没有时间限制则调用`schedule()`让出CPU资源，如果有则调用`schedule_timeout()`让出资源并过一段时间后回来。当回来的时候，判断是否等待超时，如果没有等待超时则进入下一轮循环，再次等待，如果超时则退出循环，返回错误。在让出 `CPU` 的时候，设置进程的状态为 `TASK_INTERRUPTIBLE`，并且循环的结束会通过 `signal_pending` 查看是否收到过信号，这说明这个等待信号量的进程是可以被信号中断的，也即一个等待信号量的进程是可以通过 kill 杀掉的。
 
-```text
+```c
 static long do_semtimedop(int semid, struct sembuf __user *tsops,
         unsigned nsops, const struct timespec64 *timeout)
 {
@@ -818,7 +818,7 @@ static long do_semtimedop(int semid, struct sembuf __user *tsops,
 
   `do_smart_update()` 会调用 `update_queue()`，`update_queue()` 会依次循环整个信号量集合的等待队列 `pending_alter`或者某个信号量的等待队列，试图在信号量的值变了的情况下，再次尝试 `perform_atomic_semop` 进行信号量操作。如果不成功，则尝试队列中的下一个；如果尝试成功，则调用 `unlink_queue()` 从队列上取下来，然后调用 `wake_up_sem_queue_prepare()`将 `q->sleeper` 加到 `wake_q` 上去。`q->sleeper` 是一个 `task_struct`，是等待在这个信号量操作上的进程。
 
-```text
+```c
 static int update_queue(struct sem_array *sma, int semnum, struct wake_q_head *wake_q)
 {
     struct sem_queue *q, *tmp;
@@ -858,7 +858,7 @@ static inline void wake_up_sem_queue_prepare(struct sem_queue *q, int error,
 
   接下来`wake_up_q` 就依次唤醒 `wake_q` 上的所有 `task_struct`，调用的是进程调度中分析过的 `wake_up_process()`方法。
 
-```text
+```c
 void wake_up_q(struct wake_q_head *head)
 {
     struct wake_q_node *node = head->first;
@@ -879,7 +879,7 @@ void wake_up_q(struct wake_q_head *head)
 
    `perform_atomic_semop()` 函数对于所有信号量操作都进行两次循环。在第一次循环中，如果发现计算出的 `result` 小于 0，则说明必须等待，于是跳到 `would_block` 中，设置 `q->blocking = sop` 表示这个 `queue` 是 `block` 在这个操作上，然后如果需要等待，则返回 1。如果第一次循环中发现无需等待，则第二个循环实施所有的信号量操作，将信号量的值设置为新的值，并且返回 0。
 
-```text
+```c
 static int perform_atomic_semop(struct sem_array *sma, struct sem_queue *q)
 {
     int result, sem_op, nsops;
@@ -926,13 +926,13 @@ would_block:
 }
 ```
 
-#### 5.4 `SEM_UNDO`机制
+### 5.4 `SEM_UNDO`机制
 
   信号量是整个 Linux 可见的全局资源，而不是某个进程独占的资源，好处是可以跨进程通信，坏处就是如果一个进程通过操作拿到了一个信号量，但是不幸异常退出了，如果没有来得及归还这个信号量，可能所有其他的进程都阻塞了。为此，Linux设计了`SEM_UNDO`机制解决该问题。
 
   该机制简而言之就是每一个 `semop` 操作都会保存一个反向 `struct sem_undo` 操作，当因为某个进程异常退出的时候，这个进程做的所有的操作都会回退，从而保证其他进程可以正常工作。在`sem_flg`标记位设置`SUM_UNDO`即可开启该功能。
 
-```text
+```c
 struct sem_queue {
 ......
     struct sem_undo    *undo;   /* undo structure */
@@ -942,7 +942,7 @@ struct sem_queue {
 
   在进程的 `task_struct` 里面对于信号量有一个成员 `struct sysv_sem`，里面是一个 `struct sem_undo_list`将这个进程所有的 `semop` 所带来的 `undo` 操作都串起来。
 
-```text
+```c
 struct task_struct {
 ......
     struct sysv_sem      sysvsem;
@@ -975,7 +975,7 @@ struct sem_undo_list {
 
   这种设计思想较为常见，在MySQL的`innodb`的日志系统中也有着类似的实现。
 
-### 总结
+## 总结
 
   共享内存和信号量是有着相似性有可以共同使用从而完成进程通信的手段。下面引用极客时间中的两幅图来总结二者的整个过程。
 
@@ -983,7 +983,7 @@ struct sem_undo_list {
 
 ![img](https://static001.geekbang.org/resource/image/60/7c/6028c83b0aa00e65916988911aa01b7c.png)
 
-### 源码资料
+## 源码资料
 
 \[1\] [ipc\_namespace](https://code.woboq.org/linux/linux/include/linux/ipc_namespace.h.html#28)
 
@@ -999,7 +999,7 @@ struct sem_undo_list {
 
 \[7\] [semctl\_main\(\)](https://code.woboq.org/linux/linux/ipc/sem.c.html#semctl_main)
 
-### 参考资料
+## 参考资料
 
 \[1\] wiki
 

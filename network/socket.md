@@ -1,20 +1,18 @@
 # 套接字
 
-### 一. 前言
+## 一. 前言
 
   在前面我们逐一分析了进程间通信的各种方法：信号，管道，共享内存和信号量，本文开始将分析更为复杂也是更为常用的另一套进程间通信：网络通信。网络通信和其他进程间通信最大的区别在于不局限于单机，因此成为了互联网时代的主流选择，无论是分布式、云计算、微服务、容器及自动化运营都离不开网络通信，其重要性可想而知。
 
   经过30多年的发展，网络协议栈已经变得极为复杂，远远不是一两篇文章能够说清楚的东西，所以这里着重剖析我们更为关注的东西：网络编程涉及到的相关协议栈。从本文开始，将分别介绍套接字及其创建、网络连接的建立、网络包的发送、网络包的接收、`Netfilter`剖析、`select, poll 及 epoll`剖析。除此之外，介于之前有新同学请教TCP的一些基础问题，打算写一篇扩展篇从设计理念的角度出发好好分析TCP协议的方法面面。
 
-&lt;!-- more --&gt;
-
-### 二. 套接字结构体
+## 二. 套接字结构体
 
   网络协议封装为多层，因此套接字结构体定义也有着多层结构，但是这里有一点要注意的：在网络通信中，我们通过网卡获取到的数据包至少包括了物理层，链路层和网络层的内容，因此套接字结构体仅仅从网络层开始，即通常我们只定义了传输层的套接字`socket`和网络层的套接字`sock`。`socket` 是用于负责对上给用户提供接口，并且和文件系统关联。而 `sock`负责向下对接内核网络协议栈。
 
   首先看传输层的`socket`结构体，这个结构体表征BSD套接字的通用特性。首先是状态`state`，用以表示连接情况。`type`是套接字类型，如`SOCK_STREAM`。`wq`是等待队列，在后续文章中会说明。`file`是套接字对应的文件指针，毕竟一切皆文件，所以需要统一的文件系统。`sock`结构体的`sk`变量则为网络层的套接字，`ops`是协议相关的一系列套接字操作。
 
-```text
+```c
 struct socket {
     socket_state        state;
     short           type;
@@ -28,7 +26,7 @@ struct socket {
 
   接着看看网络层，这一层即IP层，该结构体`sock`中包含了一个基本结构体`sock_common`，整体较为复杂，所以对于其重要变量进行了说明，以注释的形式在每个变量后进行分析。
 
-```text
+```c
 struct sock {
     struct sock_common  __sk_common;       // 网络层套接字通用结构体
 ......
@@ -98,7 +96,7 @@ struct sock {
 
    `sock_common`是套接口在网络层的最小表示，即最基本的网络层套接字信息，具体内容分析见注释。
 
-```text
+```c
 struct sock_common {
     /* skc_daddr and skc_rcv_saddr must be grouped on a 8 bytes aligned
      * address on 64bit arches : cf INET_MATCH()
@@ -152,7 +150,7 @@ struct sock_common {
 };
 ```
 
-### 三. 套接字缓冲区结构体
+## 三. 套接字缓冲区结构体
 
   套接字结构体用于表征一个网络连接对应的本地接口的网络信息，而`sk_buff`则是该网络连接对应的数据包的存储。`sk_buff`的详细介绍宜参考《Linux网络技术内幕》，专门有一章来描述该结构体。对于我们学习源码来说，最重要的是了解其重点成员变量以及其整体结构。
 
@@ -191,7 +189,7 @@ struct sock_common {
 
   通过以上学习，对`sk_buff`应该有了较为全面系统的了解，其详细源码如下所示，对于重点部分已写明中文注释，其他参见英文注释。
 
-```text
+```c
 struct sk_buff {
     union {
         struct {
@@ -317,11 +315,11 @@ struct sk_buff {
 };
 ```
 
-### 四. 创建套接字
+## 四. 创建套接字
 
   众所周知我们通过`socket()`生成套接字，其系统调用如下，主要调用`sock_create()`创建结构体`socket`，并通过`sock_map_fd()`将其和文件描述符进行绑定。
 
-```text
+```c
 SYSCALL_DEFINE3(socket, int, family, int, type, int, protocol)
 {
     return __sys_socket(family, type, protocol);
@@ -345,11 +343,11 @@ int __sys_socket(int family, int type, int protocol)
 * `type`：表示 `socket` 类型。`SOCK_STREAM` 是面向数据流的，协议 `IPPROTO_TCP` 属于这种类型。`SOCK_DGRAM` 是面向数据报的，协议 `IPPROTO_UDP` 属于这种类型。如果在内核里面看的话，`IPPROTO_ICMP` 也属于这种类型。`SOCK_RAW` 是原始的 `IP` 包，`IPPROTO_IP` 属于这种类型。
 * `protocol`： 表示的协议，包括 `IPPROTO_TCP`、`IPPTOTO_UDP`。
 
-![packet\_class](https://segmentfault.com/img/remote/1460000020103414?w=586&h=417)
+![](../.gitbook/assets/af.png)
 
   `sock_create()`实际调用`__sock_create()`。这里首先调用`sock_alloc()`分配套接字结构体`sock`并赋值类型为`type`，接着调用对应的`create()`函数按照`protocol`对`sock`进行填充。
 
-```text
+```c
 int sock_create(int family, int type, int protocol, struct socket **res)
 {
     return __sock_create(current->nsproxy->net_ns, family, type, protocol, res, 0);
@@ -391,7 +389,7 @@ const struct net_proto_family inet_family_ops = {
 
   `sock_alloc()`中我们看到了熟悉的东西：`new_inode_pseudo()`，即依照着虚拟文件系统的方式为套接字生成`inode`，接着通过`SOCKET_I()`获取其对应的`socket`，再进行填充。
 
-```text
+```c
 struct socket *sock_alloc(void)
 {
     struct inode *inode;
@@ -438,7 +436,7 @@ struct socket_alloc {
 * 调用`sk_alloc()`创建一个 网络层`struct sock *sk` 对象并赋值
 * 调用`inet_sk()`创建一个 `struct inet_sock` 结构并赋值。上文已说明`INET`作用域，而`inet_sock`即是对`sock`的`INET`形式封装，在`sock`的基础上增加了很多新的特性。
 
-```text
+```c
 static int inet_create(struct net *net, struct socket *sock, int protocol,
                int kern)
 {
@@ -518,7 +516,7 @@ static int inet_create(struct net *net, struct socket *sock, int protocol,
 
   `inetsw`数组里面的内容是 `struct inet_protosw`，对于每个类型的协议均有一项，这一项里面是属于这个类型的协议。`inetsw` 数组是在系统初始化的时候初始化的，一个循环会将 `inetsw` 数组的每一项都初始化为一个链表。接下来一个循环将 `inetsw_array` 注册到 `inetsw` 数组里面去。
 
-```text
+```c
 static struct list_head inetsw[SOCK_MAX];
 
 static int __init inet_init(void)
@@ -567,11 +565,11 @@ static struct inet_protosw inetsw_array[] =
 
   至此，套接字的创建就算完成了。
 
-### 总结
+## 总结
 
   本文重点分析了套接字这一网络编程中的重要结构体以及其创建函数背后的逻辑，为后文网络编程的源码解析打下基础。
 
-### 源码资料
+## 源码资料
 
 \[1\] [socket](https://code.woboq.org/linux/linux/include/linux/net.h.html#socket)
 
@@ -581,7 +579,7 @@ static struct inet_protosw inetsw_array[] =
 
 \[4\] [inet\_create\(\)](https://code.woboq.org/linux/linux/net/ipv4/af_inet.c.html#inet_create)
 
-### 参考资料
+## 参考资料
 
 \[1\] wiki
 
