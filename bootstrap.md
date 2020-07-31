@@ -1,6 +1,6 @@
 # 启动
 
-## 一. 前言
+### 一. 前言
 
   Linux操作系统内核是服务端学习的根基，也是提高编程能力、源码阅读能力和进阶知识学习能力的重要部分，本文开始将记录Linux操作系统中的各个部分源码学习历程。
 
@@ -32,14 +32,14 @@
 
   说了一大堆的废话，下面就正式开始操作系统的深入学习记录之旅了。
 
-## 二. 混沌初开
+### 二. 混沌初开
 
   本文分析从按下电源键到加载BIOS以及后续bootloader的整个过程。犹如盘古开天辟地一般，该过程将混沌的操作系统世界分为清晰的内核态和用户态，并经历从实模式到保护模式的变化。这里先简单介绍一下名次，便于后续理解。
 
 * [实模式（Real Mode\)](https://en.wikipedia.org/wiki/Real_mode)：又名 Real Address Mode，在此模式下地址访问的是真实地内存地址所在位置。在此模式下，可以使用20位（1MB）的地址空间，软件可以不受限制的操作所有地址的空间和IO设备。
 * [保护模式（Protected Mode\)](https://en.wikipedia.org/wiki/Protected_mode)：又名 Protected Virtual Address Mode，采用虚拟内存、页等机制对内存进行了保护，比起实模式更为安全可靠，同时也增加了灵活性和扩展性。
 
-### 2.1 从启动电源到BIOS
+#### 2.1 从启动电源到BIOS
 
   当我们按下电源键，主板会发向电源组发出信号，接收到信号后，电源会提供合适的电压给计算机。当主板收到电源正常启动的信号后，主板会启动CPU。CPU重置所有寄存器数据，并设置初始化数据，这个初始化数据在X86架构里如下所示：
 
@@ -60,7 +60,7 @@ PhysicalAddress = Segment Selector * 16 + Offset
 
   该部分由硬件完成，通过计算访问0XFFFF0，如果该位置没有可执行代码则计算机无法启动。如果有，则执行该部分代码，这里也就是我们故事的开始，BIOS程序了。
 
-### 2.2 BIOS到BootLoader
+#### 2.2 BIOS到BootLoader
 
   BIOS执行程序存储在ROM中，起始位置为0XFFFF0，当CS:IP指向该位置时，BIOS开始执行。BIOS主要包括以下内存映射：
 
@@ -82,7 +82,7 @@ PhysicalAddress = Segment Selector * 16 + Offset
 
   BIOS程序会选择一个启动设备，并将控制权转交给启动扇区中的代码。主要工作即使用中断向量和中断服务程序完成BootLoader的加载，最终将[boot.img](http://git.savannah.gnu.org/gitweb/?p=grub.git;a=blob;f=grub-core/boot/i386/pc/boot.S;hb=HEAD)加载至0X7C00的位置启动。Linux内核通过[Boot Protocol](https://github.com/torvalds/linux/blob/v4.16/Documentation/x86/boot.txt)定义如何实现该引导程序，有如GRUB 2和syslinux等具体实现方式，这里仅介绍GRUB2。
 
-### 2.3 BootLoader的工作
+#### 2.3 BootLoader的工作
 
   boot.img由boot.S编译而成，512字节，安装在启动盘的第一个扇区，即[MBR](https://en.wikipedia.org/wiki/Master_boot_record)。由于空间有限，其代码十分简单，仅仅是起到一个引导的作用，指向后续的核心镜像文件，即core.img。core.img包括很多重要的部分，如lzma\_decompress.img、[diskboot.img](http://git.savannah.gnu.org/gitweb/?p=grub.git;a=blob;f=grub-core/boot/i386/pc/diskboot.S;hb=HEAD)、kernel.img等，结构如下图。
 
@@ -99,11 +99,11 @@ PhysicalAddress = Segment Selector * 16 + Offset
 
   开机时的16位实模式与内核启动的main函数执行需要的32位保护模式之间有很大的差距，这个差距谁来填补？[head.S](https://github.com/torvalds/linux/blob/v4.16/arch/x86/boot/header.S)做的就是这项工作。就像 kernel boot protocol 所描述的，引导程序必须填充 kernel setup header （位于 kernel setup code 偏移 `0x01f1` 处） 的必要字段，这些均在head.S中定义。在这期间，head程序打开A20，打开pe、pg，废弃旧的、16位的中断响应机制，建立新的32位的IDT……这些工作都做完了，计算机已经处在32位的保护模式状态了，调用32位内核的一切条件已经准备完毕，这时顺理成章地调用main函数。后面的操作就可以用32位编译的main函数完成，从而正式启动内核，进入波澜壮阔的Linux内核操作系统之中。
 
-## 三. 总结
+### 三. 总结
 
   本文介绍了从按下电源开关至加载完毕BootLoader的整个过程，后续将继续分析从实模式进入保护模式，从而启动内核创建0号、1号、2号进程的整个过程。本文介绍过程中忽略了很多汇编代码以及一些虽然很重要但是不属于基本流程的知识，有兴趣了解的可以根据文中链接、文末的源码和参考资料进行更深入的学习研究。
 
-## 源码资料
+### 源码资料
 
 \[1\] src/cpu/x86/16bit
 
@@ -113,7 +113,7 @@ PhysicalAddress = Segment Selector * 16 + Offset
 
 \[4\] [syslinux](http://www.syslinux.org/wiki/index.php/The_Syslinux_Project)
 
-## 参考资料
+### 参考资料
 
 \[1\] Linux-insides
 
