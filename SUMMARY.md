@@ -24,6 +24,6 @@
   * [管道](ipc/pipe.md)
   * [共享内存和信号量](ipc/shm-and-semaphore.md)
 * [网络通信](network/README.md)
-  * [套接字](network/socket.md)
   * [TCP协议](network/tcp.md)
+  * [套接字](network/socket.md)
 
