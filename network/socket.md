@@ -158,34 +158,34 @@ struct sock_common {
 
 * 布局：方便搜索以及组织结构，主要是一个双向链表用于管理全部的`sk_buff`。每个`sk_buff`对应一个数据包，多个`sk_buff`以双向链表的形式组合而成。
 
-![img](http://www.embeddedlinux.org.cn/linux_net/0596002556/images/understandlni_0201.jpg)
+![sk\_buff&#x94FE;&#x8868;&#x7ED3;&#x6784;&#x56FE;](http://www.embeddedlinux.org.cn/linux_net/0596002556/images/understandlni_0201.jpg)
 
  除此之外还有指向`sock`的指针，缓冲区数据块大小，缓冲区及数据边界`tail，end，head，data，truesize`
 
-![img](http://www.embeddedlinux.org.cn/linux_net/0596002556/images/understandlni_0202.jpg)
+![sk\_buff&#x6307;&#x9488;&#x793A;&#x610F;&#x56FE;](http://www.embeddedlinux.org.cn/linux_net/0596002556/images/understandlni_0202.jpg)
 
 * 通用字段：与特定内核无关的字段，主要包括时间戳`tstamp`，网络设备`dev`，源设备`input_device`，L2-L4层包头对应的`mac_header, network_header, transport_header`等。其头部组织结构如下所示
 
-![img](http://www.embeddedlinux.org.cn/linux_net/0596002556/images/understandlni_0203.jpg)
+![&#x5934;&#x90E8;&#x7EC4;&#x7EC7;&#x7ED3;&#x6784;&#x56FE;](http://www.embeddedlinux.org.cn/linux_net/0596002556/images/understandlni_0203.jpg)
 
 * 功能专用：当编译防火墙（`Netfilter`\) 以及`QOS`等时才会用到的特殊字段，在此暂时不做详细介绍
 * 管理函数：由内核提供的简单的管理工具函数，用于对`sk_buff`元素和元素列表进行操作，如数据预留及对齐函数`skb_put(), skb_push()，skb_pull()，skb_reserve()`
 
-![img](http://www.embeddedlinux.org.cn/linux_net/0596002556/images/understandlni_0204.jpg)
+![sk\_buff&#x64CD;&#x4F5C;&#x51FD;&#x6570;&#x793A;&#x610F;&#x56FE;](http://www.embeddedlinux.org.cn/linux_net/0596002556/images/understandlni_0204.jpg)
 
   再比如分配回收函数`alloc_skb()`和`dev_alloc_skb()`
 
-![img](http://www.embeddedlinux.org.cn/linux_net/0596002556/images/understandlni_0205.jpg)
+![sk\_buff&#x5206;&#x914D;&#x56FE;](http://www.embeddedlinux.org.cn/linux_net/0596002556/images/understandlni_0205.jpg)
 
   释放内存函数`kfree_skb()`和`dev_kfree_skb()`
 
-![img](http://www.embeddedlinux.org.cn/linux_net/0596002556/images/understandlni_0206.jpg)
+![&#x91CA;&#x653E;&#x903B;&#x8F91;&#x56FE;](http://www.embeddedlinux.org.cn/linux_net/0596002556/images/understandlni_0206.jpg)
 
   除此之外还有克隆，复制等函数，不做过多展开介绍。
 
   `sk_buff`的整体填充过程如下图所示：
 
-![img](http://www.embeddedlinux.org.cn/linux_net/0596002556/images/understandlni_0208.jpg)
+![&#x586B;&#x5145;&#x6D41;&#x7A0B;&#x56FE;](http://www.embeddedlinux.org.cn/linux_net/0596002556/images/understandlni_0208.jpg)
 
   通过以上学习，对`sk_buff`应该有了较为全面系统的了解，其详细源码如下所示，对于重点部分已写明中文注释，其他参见英文注释。
 
