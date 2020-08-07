@@ -16,7 +16,7 @@
 
   首先来看看`bind()`函数。其API如下所示
 
-```text
+```c
 int bind(int sockfd, const struct sockaddr *addr, socklen_t addrlen);
 ​
 struct sockaddr_in {
@@ -40,7 +40,7 @@ struct in_addr {
 * 调用`move_addr_to_kernel()`将 `sockaddr` 从用户态拷贝到内核态
 * 调用 `struct socket` 结构里面 `ops` 的 `bind()` 函数。根据前面创建 `socket` 的时候的设定，调用的是 `inet_stream_ops` 的 `bind()` 函数，也即调用 `inet_bind()`。
 
-```text
+```c
 SYSCALL_DEFINE3(bind, int, fd, struct sockaddr __user *, umyaddr, int, addrlen)
 {
     return __sys_bind(fd, umyaddr, addrlen);
@@ -74,7 +74,7 @@ int __sys_bind(int fd, struct sockaddr __user *umyaddr, int addrlen)
 * 调用`fdget()->__fdget()->__fget_light()->__fcheck_files()`获取文件`file`和`flag`组合成的结构体`fd`
 * 调用`sock_from_file()`获取`file`对应的套接字`sock`
 
-```text
+```c
 static struct socket *sockfd_lookup_light(int fd, int *err, int *fput_needed)
 {
     struct fd f = fdget(fd);
@@ -97,7 +97,7 @@ static struct socket *sockfd_lookup_light(int fd, int *err, int *fput_needed)
 * 调用 `sk_prot` 的 `get_port()` 函数，也即 `inet_csk_get_port()` 来检查端口是否冲突，是否可以绑定。
 * 如果允许，则会设置 `struct inet_sock` 的本地地址 `inet_saddr` 和本地端口 `inet_sport`，对方的地址 `inet_daddr` 和对方的端口 `inet_dport` 都初始化为 0。
 
-```text
+```c
 int inet_bind(struct socket *sock, struct sockaddr *uaddr, int addr_len)
 {
     struct sock *sk = sock->sk;
@@ -141,7 +141,7 @@ int __inet_bind(struct sock *sk, struct sockaddr *uaddr, int addr_len,
 
   `listen()`的API如下，其中`backlog`需要注意，其定义为套接字监听队列的最大长度，实际上会有个小坑，具体可见[这篇博文](https://segmentfault.com/a/1190000019252960)分析。
 
-```text
+```c
 int listen(int sockfd, int backlog);
 ```
 
@@ -151,7 +151,7 @@ int listen(int sockfd, int backlog);
 * 根据`sysctl_somaxconn`和`backlog`取较小值作为监听的队列上限
 * 调用 `ops` 的 `listen()` 函数，实际调用`inet_stream_ops`中的`inet_listen()`
 
-```text
+```c
 SYSCALL_DEFINE2(listen, int, fd, int, backlog)
 {
     return __sys_listen(fd, backlog);
@@ -178,7 +178,7 @@ int __sys_listen(int fd, int backlog)
 
   `inet_listen()`主要逻辑为判断套接字`sock`是否处于监听状态`TCP_LISTEN`，如果不是则调用`inet_csk_listen_start()`进入监听状态。
 
-```text
+```c
 int inet_listen(struct socket *sock, int backlog)
 {
     struct sock *sk = sock->sk;
@@ -207,7 +207,7 @@ out:
 * 初始化`icsk_accept_queue`队列。我们知道三次握手中有两个队列：半连接队列和全连接队列。其中半连接队列指三次握手还没完成，处于 `syn_rcvd` 的状态的连接，全连接指三次握手已经完毕，处于 `established` 状态的连接。`icsk_accept_queue`队列就是半连接队列，调用`accept()`函数时会从该队列取出连接进行判断，如果三次握手顺利完成则放入全连接队列。
 * 将TCP状态设置为`TCP_LISTEN`，调用`get_port()`确保端口可用。
 
-```text
+```c
 int inet_csk_listen_start(struct sock *sk, int backlog)
 {
     struct inet_connection_sock *icsk = inet_csk(sk);
@@ -240,7 +240,7 @@ int inet_csk_listen_start(struct sock *sk, int backlog)
 
   `accept()`的API如下，服务端调用`accept()`会在监听套接字的基础上创建新的套接字来作为连接套接字，并返回连接套接字的描述符。
 
-```text
+```c
 int accept(int sockfd, struct sockaddr *addr, socklen_t *addrlen);
 ```
 
@@ -251,7 +251,7 @@ int accept(int sockfd, struct sockaddr *addr, socklen_t *addrlen);
 * 调用套接字对应的`accept()`函数，即`inet_accept()`完成实际服务端握手过程
 * 调用`fd_install()`关联套接字文件和套接字描述符，并返回连接的套接字描述符
 
-```text
+```c
 SYSCALL_DEFINE3(accept, int, fd, struct sockaddr __user *, upeer_sockaddr,
 		int __user *, upeer_addrlen)
 {
@@ -301,7 +301,7 @@ int __sys_accept4(int fd, struct sockaddr __user *upeer_sockaddr,
 
   `inet_accept()`会提取监听套接字的网络层结构体`sk1`和新建套接字的`sk2`，调用`sk1`协议对应的`accept()`完成握手并保存连接状态于`sk2`中，这里实际调用的是`inet_csk_accept()`函数。接着将`sk2`和新建套接字进行关联。
 
-```text
+```c
 int inet_accept(struct socket *sock, struct socket *newsock, int flags,
 		bool kern)
 {
@@ -326,7 +326,7 @@ do_err:
 
   `inet_csk_accept()`函数会判断当前的半连接队列`rskq_accept_queue`是否为空，如果空则调用`inet_csk_wait_for_connect()`及逆行等待。如果不为空则从队列中取出一个连接，赋值给`newsk`并返回。
 
-```text
+```c
 struct sock *inet_csk_accept(struct sock *sk, int flags, int *err, bool kern)
 {
 	struct inet_connection_sock *icsk = inet_csk(sk);
@@ -349,7 +349,7 @@ struct sock *inet_csk_accept(struct sock *sk, int flags, int *err, bool kern)
 
   `inet_csk_wait_for_connect()`调用 `schedule_timeout()`让出 CPU，并且将进程状态设置为 `TASK_INTERRUPTIBLE`。如果再次 CPU 醒来，我们会接着判断 `icsk_accept_queue` 是否为空，同时也会调用 `signal_pending` 看有没有信号可以处理。一旦 `icsk_accept_queue` 不为空，就从 `inet_csk_wait_for_connect()` 中返回，在队列中取出一个 `struct sock` 对象赋值给 `newsk`。
 
-```text
+```c
 static int inet_csk_wait_for_connect(struct sock *sk, long timeo)
 {
 	struct inet_connection_sock *icsk = inet_csk(sk);
@@ -384,7 +384,7 @@ static int inet_csk_wait_for_connect(struct sock *sk, long timeo)
 
   `connect()`函数通常由客户端发起，是三次握手的开始，服务端收到了`SYN`之后回复`ACK + SYN`并将该连接加入半连接队列，进入`SYN_RCVD`状态，第三次握手收到`ACK`后从半连接队列取出，加入全连接队列，此时的 socket 处于 `ESTABLISHED` 状态。`accept()`函数唤醒后检索队列，发现有连接则继续工作下去，从队列中取出该套接字并返回，供以后续读写使用。
 
-```text
+```c
 int connect(int sockfd, const struct sockaddr *addr, socklen_t addrlen);
 ```
 
@@ -394,7 +394,7 @@ int connect(int sockfd, const struct sockaddr *addr, socklen_t addrlen);
 * 调用`move_addr_to_kernel()`将目的地址发到内核中供使用
 * 调用初始化`connect()`函数或者设置的特定`connect()`函数，这里会调用`inet_stream_connect()`发起连接
 
-```text
+```c
 SYSCALL_DEFINE3(connect, int, fd, struct sockaddr __user *, uservaddr,
 		int, addrlen)
 {
@@ -429,7 +429,7 @@ out:
 * 判断当前套接字状态，如果尚未连接则调用 `struct sock` 的 `sk->sk_prot->connect()`，也即 `tcp_prot` 的 `connect()` 函数`tcp_v4_connect()` 函数发起握手。
 * 调用`inet_wait_for_connect()`，等待来自于服务端的`ACK`信号
 
-```text
+```c
 int inet_stream_connect(struct socket *sock, struct sockaddr *uaddr,
 			int addr_len, int flags)
 {
@@ -486,7 +486,7 @@ int __inet_stream_connect(struct socket *sock, struct sockaddr *uaddr,
 * 将客户端状态设置为`TCP_SYN_SENT`，初始化序列号`write_seq`
 * 调用`tcp_connect()`发送`SYN`包
 
-```text
+```c
 int tcp_v4_connect(struct sock *sk, struct sockaddr *uaddr, int addr_len)
 {
 	struct sockaddr_in *usin = (struct sockaddr_in *)uaddr;
@@ -546,7 +546,7 @@ int tcp_v4_connect(struct sock *sk, struct sockaddr *uaddr, int addr_len)
 * 调用`tcp_transmit_skb()` 将 `SYN` 包发送出去
 * 调用`inet_csk_reset_xmit_timer()` 设置了一个 `timer`，如果 `SYN` 发送不成功，则再次发送。
 
-```text
+```c
 int tcp_connect(struct sock *sk)
 {
 	struct tcp_sock *tp = tcp_sk(sk);
@@ -588,7 +588,7 @@ int tcp_connect(struct sock *sk)
 * 当客户端处于`TCP_SYN_SENT`状态时，收到服务端返回的第二次握手消息`ACK + SYN`，调用`tcp_rcv_synsent_state_process()`进行处理，调用`tcp_send_ack()`发送`ACK`回复给服务端，进入`TCP_ESTABLISHED`状态
 * 服务端处于`TCP_SYN_RECV`状态时，收到客户端返回的第三次握手消息`ACK`，进入`TCP_ESTABLISHED`状态
 
-```text
+```c
 int tcp_rcv_state_process(struct sock *sk, struct sk_buff *skb)
 {
 	struct tcp_sock *tp = tcp_sk(sk);
