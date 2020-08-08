@@ -255,46 +255,46 @@ int accept(int sockfd, struct sockaddr *addr, socklen_t *addrlen);
 SYSCALL_DEFINE3(accept, int, fd, struct sockaddr __user *, upeer_sockaddr,
 		int __user *, upeer_addrlen)
 {
-	return __sys_accept4(fd, upeer_sockaddr, upeer_addrlen, 0);
+	  return __sys_accept4(fd, upeer_sockaddr, upeer_addrlen, 0);
 }
 
 int __sys_accept4(int fd, struct sockaddr __user *upeer_sockaddr,
 		  int __user *upeer_addrlen, int flags)
 {
-	struct socket *sock, *newsock;
-	struct file *newfile;
-	int err, len, newfd, fput_needed;
-	struct sockaddr_storage address;
+	  struct socket *sock, *newsock;
+	  struct file *newfile;
+	  int err, len, newfd, fput_needed;
+	  struct sockaddr_storage address;
 ......
-	sock = sockfd_lookup_light(fd, &err, &fput_needed);
+	  sock = sockfd_lookup_light(fd, &err, &fput_needed);
 ......
-	newsock = sock_alloc();
+	  newsock = sock_alloc();
 ......
-	newsock->type = sock->type;
-	newsock->ops = sock->ops;
+	  newsock->type = sock->type;
+	  newsock->ops = sock->ops;
 ......
-	__module_get(newsock->ops->owner);
-	newfd = get_unused_fd_flags(flags);
+	  __module_get(newsock->ops->owner);
+	  newfd = get_unused_fd_flags(flags);
 ......
-	newfile = sock_alloc_file(newsock, flags, sock->sk->sk_prot_creator->name);
+	  newfile = sock_alloc_file(newsock, flags, sock->sk->sk_prot_creator->name);
 ......
-	err = sock->ops->accept(sock, newsock, sock->file->f_flags, false);
-	if (err < 0)
-		goto out_fd;
-	if (upeer_sockaddr) {
-		len = newsock->ops->getname(newsock,
+	  err = sock->ops->accept(sock, newsock, sock->file->f_flags, false);
+	  if (err < 0)
+		    goto out_fd;
+	  if (upeer_sockaddr) {
+		    len = newsock->ops->getname(newsock,
 					(struct sockaddr *)&address, 2);
-		if (len < 0) {
-			err = -ECONNABORTED;
-			goto out_fd;
-		}
-		err = move_addr_to_user(&address,
+		    if (len < 0) {
+			      err = -ECONNABORTED;
+			      goto out_fd;
+		    }
+		    err = move_addr_to_user(&address,
 					len, upeer_sockaddr, upeer_addrlen);
-		if (err < 0)
-			goto out_fd;
-	}
+		    if (err < 0)
+			      goto out_fd;
+	  }
 	/* File flags are not inherited via accept() unlike another OSes. */
-	fd_install(newfd, newfile);
+	  fd_install(newfd, newfile);
 ......
 }
 ```
@@ -303,24 +303,24 @@ int __sys_accept4(int fd, struct sockaddr __user *upeer_sockaddr,
 
 ```c
 int inet_accept(struct socket *sock, struct socket *newsock, int flags,
-		bool kern)
+        bool kern)
 {
-	struct sock *sk1 = sock->sk;
-	int err = -EINVAL;
-	struct sock *sk2 = sk1->sk_prot->accept(sk1, flags, &err, kern);
-	if (!sk2)
-		goto do_err;
-	lock_sock(sk2);
-	sock_rps_record_flow(sk2);
-	WARN_ON(!((1 << sk2->sk_state) &
-		  (TCPF_ESTABLISHED | TCPF_SYN_RECV |
-		  TCPF_CLOSE_WAIT | TCPF_CLOSE)));
-	sock_graft(sk2, newsock);
-	newsock->state = SS_CONNECTED;
-	err = 0;
-	release_sock(sk2);
+    struct sock *sk1 = sock->sk;
+    int err = -EINVAL;
+    struct sock *sk2 = sk1->sk_prot->accept(sk1, flags, &err, kern);
+    if (!sk2)
+        goto do_err;
+    lock_sock(sk2);
+    sock_rps_record_flow(sk2);
+    WARN_ON(!((1 << sk2->sk_state) &
+          (TCPF_ESTABLISHED | TCPF_SYN_RECV |
+          TCPF_CLOSE_WAIT | TCPF_CLOSE)));
+    sock_graft(sk2, newsock);
+    newsock->state = SS_CONNECTED;
+    err = 0;
+    release_sock(sk2);
 do_err:
-	return err;
+    return err;
 }
 ```
 
@@ -329,20 +329,20 @@ do_err:
 ```c
 struct sock *inet_csk_accept(struct sock *sk, int flags, int *err, bool kern)
 {
-	struct inet_connection_sock *icsk = inet_csk(sk);
-	struct request_sock_queue *queue = &icsk->icsk_accept_queue;
-	struct request_sock *req;
-	struct sock *newsk;
-	int error;
+    struct inet_connection_sock *icsk = inet_csk(sk);
+    struct request_sock_queue *queue = &icsk->icsk_accept_queue;
+    struct request_sock *req;
+    struct sock *newsk;
+    int error;
 ......
-	/* Find already established connection */
-	if (reqsk_queue_empty(queue)) {
+    /* Find already established connection */
+    if (reqsk_queue_empty(queue)) {
 ......
-		error = inet_csk_wait_for_connect(sk, timeo);
+        error = inet_csk_wait_for_connect(sk, timeo);
 ......
-	}
-	req = reqsk_queue_remove(queue, sk);
-	newsk = req->sk;
+    }
+    req = reqsk_queue_remove(queue, sk);
+    newsk = req->sk;
 ......
 }
 ```
@@ -352,31 +352,31 @@ struct sock *inet_csk_accept(struct sock *sk, int flags, int *err, bool kern)
 ```c
 static int inet_csk_wait_for_connect(struct sock *sk, long timeo)
 {
-	struct inet_connection_sock *icsk = inet_csk(sk);
-	DEFINE_WAIT(wait);
-	int err;
-	for (;;) {
-		prepare_to_wait_exclusive(sk_sleep(sk), &wait, TASK_INTERRUPTIBLE);
-		release_sock(sk);
-		if (reqsk_queue_empty(&icsk->icsk_accept_queue))
-			timeo = schedule_timeout(timeo);
-		sched_annotate_sleep();
-		lock_sock(sk);
-		err = 0;
-		if (!reqsk_queue_empty(&icsk->icsk_accept_queue))
-			break;
-		err = -EINVAL;
-		if (sk->sk_state != TCP_LISTEN)
-			break;
-		err = sock_intr_errno(timeo);
-		if (signal_pending(current))
-			break;
-		err = -EAGAIN;
-		if (!timeo)
-			break;
-	}
-	finish_wait(sk_sleep(sk), &wait);
-	return err;
+    struct inet_connection_sock *icsk = inet_csk(sk);
+    DEFINE_WAIT(wait);
+    int err;
+    for (;;) {
+        prepare_to_wait_exclusive(sk_sleep(sk), &wait, TASK_INTERRUPTIBLE);
+        release_sock(sk);
+        if (reqsk_queue_empty(&icsk->icsk_accept_queue))
+            timeo = schedule_timeout(timeo);
+        sched_annotate_sleep();
+        lock_sock(sk);
+        err = 0;
+        if (!reqsk_queue_empty(&icsk->icsk_accept_queue))
+            break;
+        err = -EINVAL;
+        if (sk->sk_state != TCP_LISTEN)
+            break;
+        err = sock_intr_errno(timeo);
+        if (signal_pending(current))
+            break;
+        err = -EAGAIN;
+        if (!timeo)
+            break;
+    }
+    finish_wait(sk_sleep(sk), &wait);
+    return err;
 }
 ```
 
