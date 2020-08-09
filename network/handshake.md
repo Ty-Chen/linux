@@ -8,7 +8,7 @@
 
   一个简单的TCP客户端/服务端模型如下所示，其中`Socket()`会创建套接字并返回描述符，在前文已经详细分析过。之后`bind()`会绑定本地的IP/Port二元组用以定位，而`connect(), listen(), accept()`则是本篇的重点所在，即通过三次握手完成连接的建立。
 
-![img](https://static001.geekbang.org/resource/image/99/da/997e39e5574252ada22220e4b3646dda.png)
+![API&#x8C03;&#x7528;&#x5173;&#x7CFB;&#x56FE;](https://static001.geekbang.org/resource/image/99/da/997e39e5574252ada22220e4b3646dda.png)
 
 ### 三. 源码分析
 
