@@ -8,7 +8,7 @@
 
   一个简单的TCP客户端/服务端模型如下所示，其中`Socket()`会创建套接字并返回描述符，在前文已经详细分析过。之后`bind()`会绑定本地的IP/Port二元组用以定位，而`connect(), listen(), accept()`则是本篇的重点所在，即通过三次握手完成连接的建立。
 
-![API&#x8C03;&#x7528;&#x5173;&#x7CFB;&#x56FE;](https://static001.geekbang.org/resource/image/99/da/997e39e5574252ada22220e4b3646dda.png)
+![img](https://static001.geekbang.org/resource/image/99/da/997e39e5574252ada22220e4b3646dda.png)
 
 ### 三. 源码分析
 
@@ -489,52 +489,52 @@ int __inet_stream_connect(struct socket *sock, struct sockaddr *uaddr,
 ```c
 int tcp_v4_connect(struct sock *sk, struct sockaddr *uaddr, int addr_len)
 {
-    struct sockaddr_in *usin = (struct sockaddr_in *)uaddr;
-    struct inet_sock *inet = inet_sk(sk);
-    struct tcp_sock *tp = tcp_sk(sk);
-    __be16 orig_sport, orig_dport;
-    __be32 daddr, nexthop;
-    struct flowi4 *fl4;
-    struct rtable *rt;
+	struct sockaddr_in *usin = (struct sockaddr_in *)uaddr;
+	struct inet_sock *inet = inet_sk(sk);
+	struct tcp_sock *tp = tcp_sk(sk);
+	__be16 orig_sport, orig_dport;
+	__be32 daddr, nexthop;
+	struct flowi4 *fl4;
+	struct rtable *rt;
 ......
-    orig_sport = inet->inet_sport;
-    orig_dport = usin->sin_port;
-    fl4 = &inet->cork.fl.u.ip4;
-    rt = ip_route_connect(fl4, nexthop, inet->inet_saddr,
-                  RT_CONN_FLAGS(sk), sk->sk_bound_dev_if,
-                  IPPROTO_TCP,
-                  orig_sport, orig_dport, sk);
+	orig_sport = inet->inet_sport;
+	orig_dport = usin->sin_port;
+	fl4 = &inet->cork.fl.u.ip4;
+	rt = ip_route_connect(fl4, nexthop, inet->inet_saddr,
+			      RT_CONN_FLAGS(sk), sk->sk_bound_dev_if,
+			      IPPROTO_TCP,
+			      orig_sport, orig_dport, sk);
 ......
-    /* Socket identity is still unknown (sport may be zero).
-     * However we set state to SYN-SENT and not releasing socket
-     * lock select source port, enter ourselves into the hash tables and
-     * complete initialization after this.
-     */
-    tcp_set_state(sk, TCP_SYN_SENT);
-    err = inet_hash_connect(tcp_death_row, sk);
-    if (err)
-        goto failure;
-    sk_set_txhash(sk);
-    rt = ip_route_newports(fl4, rt, orig_sport, orig_dport,
-                   inet->inet_sport, inet->inet_dport, sk);
+	/* Socket identity is still unknown (sport may be zero).
+	 * However we set state to SYN-SENT and not releasing socket
+	 * lock select source port, enter ourselves into the hash tables and
+	 * complete initialization after this.
+	 */
+	tcp_set_state(sk, TCP_SYN_SENT);
+	err = inet_hash_connect(tcp_death_row, sk);
+	if (err)
+		goto failure;
+	sk_set_txhash(sk);
+	rt = ip_route_newports(fl4, rt, orig_sport, orig_dport,
+			       inet->inet_sport, inet->inet_dport, sk);
 ......
-    /* OK, now commit destination to socket.  */
-    sk->sk_gso_type = SKB_GSO_TCPV4;
-    sk_setup_caps(sk, &rt->dst);
-    rt = NULL;
-    if (likely(!tp->repair)) {
-        if (!tp->write_seq)
-            tp->write_seq = secure_tcp_seq(inet->inet_saddr,
-                               inet->inet_daddr,
-                               inet->inet_sport,
-                               usin->sin_port);
-        tp->tsoffset = secure_tcp_ts_off(sock_net(sk),
-                         inet->inet_saddr,
-                         inet->inet_daddr);
-    }
-    inet->inet_id = tp->write_seq ^ jiffies;
+	/* OK, now commit destination to socket.  */
+	sk->sk_gso_type = SKB_GSO_TCPV4;
+	sk_setup_caps(sk, &rt->dst);
+	rt = NULL;
+	if (likely(!tp->repair)) {
+		if (!tp->write_seq)
+			tp->write_seq = secure_tcp_seq(inet->inet_saddr,
+						       inet->inet_daddr,
+						       inet->inet_sport,
+						       usin->sin_port);
+		tp->tsoffset = secure_tcp_ts_off(sock_net(sk),
+						 inet->inet_saddr,
+						 inet->inet_daddr);
+	}
+	inet->inet_id = tp->write_seq ^ jiffies;
 ......
-    err = tcp_connect(sk);
+	err = tcp_connect(sk);
 ......
 }
 ```
@@ -549,36 +549,36 @@ int tcp_v4_connect(struct sock *sk, struct sockaddr *uaddr, int addr_len)
 ```c
 int tcp_connect(struct sock *sk)
 {
-    struct tcp_sock *tp = tcp_sk(sk);
-    struct sk_buff *buff;
-    int err;
+	struct tcp_sock *tp = tcp_sk(sk);
+	struct sk_buff *buff;
+	int err;
 ......
-    tcp_connect_init(sk);
+	tcp_connect_init(sk);
 ......
-    buff = sk_stream_alloc_skb(sk, 0, sk->sk_allocation, true);
+	buff = sk_stream_alloc_skb(sk, 0, sk->sk_allocation, true);
 ......
-    tcp_init_nondata_skb(buff, tp->write_seq++, TCPHDR_SYN);
-    tcp_mstamp_refresh(tp);
-    tp->retrans_stamp = tcp_time_stamp(tp);
-    tcp_connect_queue_skb(sk, buff);
-    tcp_ecn_send_syn(sk, buff);
-    tcp_rbtree_insert(&sk->tcp_rtx_queue, buff);
-    /* Send off SYN; include data in Fast Open. */
-    err = tp->fastopen_req ? tcp_send_syn_data(sk, buff) :
-          tcp_transmit_skb(sk, buff, 1, sk->sk_allocation);
+	tcp_init_nondata_skb(buff, tp->write_seq++, TCPHDR_SYN);
+	tcp_mstamp_refresh(tp);
+	tp->retrans_stamp = tcp_time_stamp(tp);
+	tcp_connect_queue_skb(sk, buff);
+	tcp_ecn_send_syn(sk, buff);
+	tcp_rbtree_insert(&sk->tcp_rtx_queue, buff);
+	/* Send off SYN; include data in Fast Open. */
+	err = tp->fastopen_req ? tcp_send_syn_data(sk, buff) :
+	      tcp_transmit_skb(sk, buff, 1, sk->sk_allocation);
 ......
-    tp->snd_nxt = tp->write_seq;
-    tp->pushed_seq = tp->write_seq;
-    buff = tcp_send_head(sk);
-    if (unlikely(buff)) {
-        tp->snd_nxt	= TCP_SKB_CB(buff)->seq;
-        tp->pushed_seq	= TCP_SKB_CB(buff)->seq;
-    }
-    TCP_INC_STATS(sock_net(sk), TCP_MIB_ACTIVEOPENS);
-    /* Timer for repeating the SYN until an answer. */
-    inet_csk_reset_xmit_timer(sk, ICSK_TIME_RETRANS,
-                  inet_csk(sk)->icsk_rto, TCP_RTO_MAX);
-    return 0;
+	tp->snd_nxt = tp->write_seq;
+	tp->pushed_seq = tp->write_seq;
+	buff = tcp_send_head(sk);
+	if (unlikely(buff)) {
+		tp->snd_nxt	= TCP_SKB_CB(buff)->seq;
+		tp->pushed_seq	= TCP_SKB_CB(buff)->seq;
+	}
+	TCP_INC_STATS(sock_net(sk), TCP_MIB_ACTIVEOPENS);
+	/* Timer for repeating the SYN until an answer. */
+	inet_csk_reset_xmit_timer(sk, ICSK_TIME_RETRANS,
+				  inet_csk(sk)->icsk_rto, TCP_RTO_MAX);
+	return 0;
 }
 ```
 
@@ -591,65 +591,65 @@ int tcp_connect(struct sock *sk)
 ```c
 int tcp_rcv_state_process(struct sock *sk, struct sk_buff *skb)
 {
-    struct tcp_sock *tp = tcp_sk(sk);
-    struct inet_connection_sock *icsk = inet_csk(sk);
-    const struct tcphdr *th = tcp_hdr(skb);
-    struct request_sock *req;
-    int queued = 0;
-    bool acceptable;
-    switch (sk->sk_state) {
-    case TCP_CLOSE:
-        goto discard;
-    case TCP_LISTEN:
+	struct tcp_sock *tp = tcp_sk(sk);
+	struct inet_connection_sock *icsk = inet_csk(sk);
+	const struct tcphdr *th = tcp_hdr(skb);
+	struct request_sock *req;
+	int queued = 0;
+	bool acceptable;
+	switch (sk->sk_state) {
+	case TCP_CLOSE:
+		goto discard;
+	case TCP_LISTEN:
 ......
-        if (th->syn) {
+		if (th->syn) {
 ......
-            acceptable = icsk->icsk_af_ops->conn_request(sk, skb) >= 0;
+			acceptable = icsk->icsk_af_ops->conn_request(sk, skb) >= 0;
 ......
-            consume_skb(skb);
-            return 0;
-        }
-        goto discard;
-    case TCP_SYN_SENT:
-        tp->rx_opt.saw_tstamp = 0;
-        tcp_mstamp_refresh(tp);
-        queued = tcp_rcv_synsent_state_process(sk, skb, th);
-        if (queued >= 0)
-            return queued;
-        /* Do step6 onward by hand. */
-        tcp_urg(sk, skb, th);
-        __kfree_skb(skb);
-        tcp_data_snd_check(sk);
-        return 0;
-    }
+			consume_skb(skb);
+			return 0;
+		}
+		goto discard;
+	case TCP_SYN_SENT:
+		tp->rx_opt.saw_tstamp = 0;
+		tcp_mstamp_refresh(tp);
+		queued = tcp_rcv_synsent_state_process(sk, skb, th);
+		if (queued >= 0)
+			return queued;
+		/* Do step6 onward by hand. */
+		tcp_urg(sk, skb, th);
+		__kfree_skb(skb);
+		tcp_data_snd_check(sk);
+		return 0;
+	}
 ......
-    switch (sk->sk_state) {
-    case TCP_SYN_RECV:
-        tp->delivered++; /* SYN-ACK delivery isn't tracked in tcp_ack */
-        if (!tp->srtt_us)
-            tcp_synack_rtt_meas(sk, req);
+	switch (sk->sk_state) {
+	case TCP_SYN_RECV:
+		tp->delivered++; /* SYN-ACK delivery isn't tracked in tcp_ack */
+		if (!tp->srtt_us)
+			tcp_synack_rtt_meas(sk, req);
 ......
-        smp_mb();
-        tcp_set_state(sk, TCP_ESTABLISHED);
-        sk->sk_state_change(sk);
-        /* Note, that this wakeup is only for marginal crossed SYN case.
-         * Passively open sockets are not waked up, because
-         * sk->sk_sleep == NULL and sk->sk_socket == NULL.
-         */
-        if (sk->sk_socket)
-            sk_wake_async(sk, SOCK_WAKE_IO, POLL_OUT);
-        tp->snd_una = TCP_SKB_CB(skb)->ack_seq;
-        tp->snd_wnd = ntohs(th->window) << tp->rx_opt.snd_wscale;
-        tcp_init_wl(tp, TCP_SKB_CB(skb)->seq);
-        if (tp->rx_opt.tstamp_ok)
-            tp->advmss -= TCPOLEN_TSTAMP_ALIGNED;
-        if (!inet_csk(sk)->icsk_ca_ops->cong_control)
-            tcp_update_pacing_rate(sk);
-        /* Prevent spurious tcp_cwnd_restart() on first data packet */
-        tp->lsndtime = tcp_jiffies32;
-        tcp_initialize_rcv_mss(sk);
-        tcp_fast_path_on(tp);
-        break;
+		smp_mb();
+		tcp_set_state(sk, TCP_ESTABLISHED);
+		sk->sk_state_change(sk);
+		/* Note, that this wakeup is only for marginal crossed SYN case.
+		 * Passively open sockets are not waked up, because
+		 * sk->sk_sleep == NULL and sk->sk_socket == NULL.
+		 */
+		if (sk->sk_socket)
+			sk_wake_async(sk, SOCK_WAKE_IO, POLL_OUT);
+		tp->snd_una = TCP_SKB_CB(skb)->ack_seq;
+		tp->snd_wnd = ntohs(th->window) << tp->rx_opt.snd_wscale;
+		tcp_init_wl(tp, TCP_SKB_CB(skb)->seq);
+		if (tp->rx_opt.tstamp_ok)
+			tp->advmss -= TCPOLEN_TSTAMP_ALIGNED;
+		if (!inet_csk(sk)->icsk_ca_ops->cong_control)
+			tcp_update_pacing_rate(sk);
+		/* Prevent spurious tcp_cwnd_restart() on first data packet */
+		tp->lsndtime = tcp_jiffies32;
+		tcp_initialize_rcv_mss(sk);
+		tcp_fast_path_on(tp);
+		break;
 ......
 }
 ```
