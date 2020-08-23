@@ -1,10 +1,10 @@
 # 网络通信之发包
 
-### 一. 简介
+## 一. 简介
 
   本文将分析网络协议栈发包的整个流程，根据顺序我们将依次介绍套接字文件系统、传输层、网络层、数据链路层、硬件设备层的相关发包处理流程，内容较多较复杂，主要掌握整个流程即可。
 
-### 二. 套接字文件系统
+## 二. 套接字文件系统
 
   在前文中已经介绍了套接字`socket`和文件描述符`fd`以及对应的文件`file`的关系。在用户态使用网络编程的时候，我们可以采用`write()`和`read()`的方式通过文件描述符写入。套接字文件系统的操作定义如下，读对应的是`sock_read_iter()`，写对应的是`sock_read_iter()`
 
@@ -55,7 +55,7 @@ int inet_sendmsg(struct socket *sock, struct msghdr *msg, size_t size)
 }
 ```
 
-### 三. TCP层
+## 三. TCP层
 
   通过前文分析我们知道`sk_buff`存放了所有需要发送的数据包，因此来自于用户态的`msg`也需要填写至其中。`tcp_sendmsg()`需要首先要分配空闲的`sk_buff`并拷贝`msg`，接着需要将该消息发送出去。其中消息的拷贝考虑到可能较长需要分片，因此会循环分配，循环主要逻辑为：
 
@@ -274,7 +274,7 @@ static int tcp_transmit_skb(struct sock *sk, struct sk_buff *skb, int clone_it,
 }
 ```
 
-### 四. IP层
+## 四. IP层
 
   `ip_queue_xmit()`实际调用`__ip_queue_xmit()`，其逻辑为
 
@@ -454,7 +454,7 @@ int ip_output(struct net *net, struct sock *sk, struct sk_buff *skb)
 
   在 `ip_output` 里面我们又看到了熟悉的 `NF_HOOK`。这一次是 `NF_INET_POST_ROUTING`，也即 `POSTROUTING` 链，处理完之后调用 `ip_finish_output()`进入MAC层。
 
-### 五. MAC层
+## 五. MAC层
 
   `ip_finish_output()`实际调用`ip_finish_output2()`，其主要逻辑为：
 
@@ -969,13 +969,13 @@ ixgbe_xmit_frame(struct sk_buff *skb, struct net_device *netdev)
 }
 ```
 
-### 总结
+## 总结
 
   整个网络协议栈的发送流程很长，中间也有不少关键步骤值得注意，值得仔细研究。
 
 ![img](https://static001.geekbang.org/resource/image/79/6f/79cc42f3163d159a66e163c006d9f36f.png)
 
-### 源码资料
+## 源码资料
 
 \[1\] [socket\_file\_ops](https://code.woboq.org/linux/linux/net/socket.c.html#sock_write_iter)
 
@@ -989,7 +989,7 @@ ixgbe_xmit_frame(struct sk_buff *skb, struct net_device *netdev)
 
 \[6\] [neigh\_resolve\_output\(\)](https://code.woboq.org/linux/linux/net/core/neighbour.c.html#neigh_resolve_output)
 
-### 参考资料
+## 参考资料
 
 \[1\] wiki
 
