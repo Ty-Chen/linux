@@ -1,12 +1,10 @@
 # 网络通信之收包
 
-### 一. 简介
+## 一. 简介
 
   本文将分析网络协议栈收包的整个流程，收包和发包是刚好相反的过程。根据顺序我们将依次介绍硬件设备驱动层、数据链路层、网络层、传输层、套接字文件系统的相关发包处理流程，内容较多较复杂，主要掌握整个流程即可。
 
-&lt;!-- more --&gt;
-
-### 二. 网卡驱动层
+## 二. 网卡驱动层
 
   网卡作为一个硬件，接收到网络包后靠中断来通知操作系统。但是这里有个问题：网络包的到来往往是很难预期的。网络吞吐量比较大的时候，网络包的到达会十分频繁。这个时候，如果非常频繁地去触发中断，会造成频繁的上下文切换，带来极大的开销。因此硬件处理厂商设计了一种机制，就是当一些网络包到来触发了中断，内核处理完这些网络包之后，我们可以先进入主动轮询 `poll` 网卡的方式主动去接收到来的网络包。如果一直有，就一直处理，等处理告一段落，就返回干其他的事情。当再有下一批网络包到来的时候，再中断，再轮询 `poll`。这样就会大大减少中断的数量，提升网络处理的效率，这种处理方式我们称为 [NAPI](https://en.wikipedia.org/wiki/New_API)。
 
@@ -232,7 +230,7 @@ ixgb_clean_rx_irq(struct ixgb_adapter *adapter, int *work_done, int work_to_do)
 }
 ```
 
-### 三. MAC层
+## 三. MAC层
 
   从 `netif_receive_skb()` 函数开始，我们就进入了内核的网络协议栈。接下来的调用链为：`netif_receive_skb()->netif_receive_skb_internal()->__netif_receive_skb()->__netif_receive_skb_core()`。在 `__netif_receive_skb_core()` 中，我们先是处理了二层的一些逻辑，如对于 VLAN 的处理，如果不是则调用`deliver_ptype_list_skb()` 在一个协议列表中逐个匹配在网络包 struct sk\_buff 里面定义的 `skb->protocol`，该变量表示三层使用的协议类型。
 
@@ -297,7 +295,7 @@ static struct packet_type ip_packet_type __read_mostly = {
 };
 ```
 
-### 四. 网络层
+## 四. 网络层
 
   在`ip_rcv()`中，我们又看到了熟悉的Netfilter，这次对应的是`PREROUTING`状态，执行完定义的钩子函数后，会继续执行`ip_rcv_finish()`。
 
@@ -384,7 +382,7 @@ static struct net_protocol udp_protocol = {
 };
 ```
 
-### 五. 传输层
+## 五. 传输层
 
   在 `tcp_v4_rcv()` 中，首先会获取 TCP 的头部，接着就开始处理 TCP 层的事情。因为 TCP 层是分状态的，状态被维护在数据结构 `struct sock` 里面，因而要根据 `IP` 地址以及 `TCP` 头里面的内容，在 `tcp_hashinfo` 中找到这个包对应的 struct sock，从而得到这个包对应的连接的状态。接下来就根据不同的状态做不同的处理。如在前文三次握手的分析中已经剖析了`TCP_NEW_SYN_RECV`后续的逻辑。对于正常通信包，则会涉及到三条队列的操作。
 
@@ -554,7 +552,7 @@ drop:
 }
 ```
 
-### 六. 套接字层
+## 六. 套接字层
 
   当接收的网络包进入各种队列之后，接下来我们就要等待用户进程去读取它们了。读取一个 `socket`，就像读取一个文件一样，读取 `socket` 的文件描述符，通过 `read` 系统调用。`read` 系统调用对于一个文件描述符的操作，大致过程都是类似的，在文件系统那一节，我们已经详细解析过。最终它会调用到用来表示一个打开文件的结构 `stuct file` 指向的 `file_operations` 操作。
 
@@ -710,7 +708,7 @@ found_ok_skb:
 }
 ```
 
-### 总结
+## 总结
 
   至此网络协议栈的收发流程都已经分析完毕了。收包流程可以总结为以下过程
 
@@ -735,7 +733,7 @@ found_ok_skb:
 
 ![img](https://static001.geekbang.org/resource/image/20/52/20df32a842495d0f629ca5da53e47152.png)
 
-### 源码资料
+## 源码资料
 
 \[1\] [ixgb\_init\_module\(\)](https://code.woboq.org/linux/linux/drivers/net/ethernet/intel/ixgb/ixgb_main.c.html#ixgb_init_module)
 
@@ -751,7 +749,7 @@ found_ok_skb:
 
 \[7\] [tcp\_recvmsg\(\)](https://code.woboq.org/linux/linux/net/ipv4/tcp.c.html#tcp_recvmsg)
 
-### 参考资料
+## 参考资料
 
 \[1\] wiki
 
