@@ -10,7 +10,7 @@
 
   本文以 Intel\(R\) PRO/10GbE 网卡驱动为例，在网卡驱动程序初始化的时候，我们会调用 `ixgb_init_module()`注册一个驱动 `ixgb_driver`，并且调用它的 `probe` 函数 `ixgb_probe()`。
 
-```text
+```c
 static struct pci_driver ixgb_driver = {
     .name     = ixgb_driver_name,
     .id_table = ixgb_pci_tbl,
