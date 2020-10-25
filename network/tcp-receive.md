@@ -35,7 +35,7 @@ module_init(ixgb_init_module);
 
    `ixgb_probe()` 会创建一个 `struct net_device` 表示这个网络设备，并且调用 `netif_napi_add()` 函数为这个网络设备注册一个轮询 `poll` 函数 `ixgb_clean()`，将来一旦出现网络包的时候，就通过该函数来轮询。
 
-```text
+```c
 static int
 ixgb_probe(struct pci_dev *pdev, const struct pci_device_id *ent)
 {
@@ -69,7 +69,7 @@ ixgb_probe(struct pci_dev *pdev, const struct pci_device_id *ent)
 
   网卡被激活的时候会调用函数 `ixgb_open()->ixgb_up()`，在这里面注册一个硬件的中断处理函数。
 
-```text
+```c
 intixgb_up(struct ixgb_adapter *adapter)
 { 
     struct net_device *netdev = adapter->netdev;
@@ -81,7 +81,7 @@ intixgb_up(struct ixgb_adapter *adapter)
 
   如果一个网络包到来，触发了硬件中断，就会调用 `ixgb_intr()`，这里面会调用 `__napi_schedule()`。
 
-```text
+```c
 static irqreturn_t ixgb_intr(int irq, void *data)
 { 
     struct net_device *netdev = data; 
@@ -99,7 +99,7 @@ static irqreturn_t ixgb_intr(int irq, void *data)
 
   `__napi_schedule()` 处于中断处理的关键部分，在被调用的时候，中断是暂时关闭的。处理网络包是个复杂的过程，需要到中断处理的延迟处理部分执行，所以 `____napi_schedule()` 将当前设备放到 `struct softnet_data` 结构的 `poll_list` 里面，说明在延迟处理部分可以接着处理这个 `poll_list` 里面的网络设备。然后 `____napi_schedule()` 触发一个软中断 `NET_RX_SOFTIRQ`，通过软中断触发中断处理的延迟处理部分，也是常用的手段。
 
-```text
+```c
 /**
  * __napi_schedule - schedule for receive
  * @n: entry to schedule
@@ -128,7 +128,7 @@ static inline void ____napi_schedule(struct softnet_data *sd,
 * 调用`this_cpu_ptr()`，得到 `struct softnet_data` 结构，这个结构在发送的时候我们也遇到过。当时它的 `output_queue` 用于网络包的发送，这里的 `poll_list` 用于网络包的接收。
 * 进入循环，从 `poll_list` 里面取出有网络包到达的设备，然后调用 `napi_poll()` 来轮询这些设备，`napi_poll()` 会调用最初设备初始化的时候注册的 `poll` 函数，对于 `ixgb_driver`对应的函数是 `ixgb_clean()`。
 
-```text
+```c
 static __latent_entropy void net_rx_action(struct softirq_action *h)
 {
     struct softnet_data *sd = this_cpu_ptr(&softnet_data);
@@ -154,7 +154,7 @@ struct softnet_data
 
   `ixgb_clean()` 实际调用`ixgb_clean_rx_irq()`。在网络设备的驱动层，有一个用于接收网络包的 `rx_ring`。它是一个环，从网卡硬件接收的包会放在这个环里面。这个环里面的 `buffer_info[]`是一个数组，存放的是网络包的内容。`i` 和 `j` 是这个数组的下标，在 `ixgb_clean_rx_irq()` 里面的 `while` 循环中，依次处理环里面的数据。在这里面，我们看到了 `i` 和 `j` 加一之后，如果超过了数组的大小，就跳回下标 0，就说明这是一个环。`ixgb_check_copybreak()` 函数将 `buffer_info` 里面的内容拷贝到 `struct sk_buff *skb`，从而可以作为一个网络包进行后续的处理，然后调用 `netif_receive_skb()`进入MAC层继续进行收包的解析处理。
 
-```text
+```c
 static int ixgb_clean(struct napi_struct *napi, int budget)
 {
     struct ixgb_adapter *adapter = container_of(napi, struct ixgb_adapter, napi);
