@@ -234,7 +234,7 @@ ixgb_clean_rx_irq(struct ixgb_adapter *adapter, int *work_done, int work_to_do)
 
   从 `netif_receive_skb()` 函数开始，我们就进入了内核的网络协议栈。接下来的调用链为：`netif_receive_skb()->netif_receive_skb_internal()->__netif_receive_skb()->__netif_receive_skb_core()`。在 `__netif_receive_skb_core()` 中，我们先是处理了二层的一些逻辑，如对于 VLAN 的处理，如果不是则调用`deliver_ptype_list_skb()` 在一个协议列表中逐个匹配在网络包 struct sk\_buff 里面定义的 `skb->protocol`，该变量表示三层使用的协议类型。
 
-```text
+```c
 static int __netif_receive_skb_core(struct sk_buff *skb, bool pfmemalloc)
 {
     struct packet_type *ptype, *pt_prev;
@@ -278,7 +278,7 @@ static inline void deliver_ptype_list_skb(struct sk_buff *skb,
 
 无论是VLAN还是普通的包，最后的发送均会调用`deliver_skb()`，该函数会调用协议定义好的函数进行网络层解析。对于IP协议即为`ip_rcv()`。
 
-```text
+```c
 static inline int deliver_skb(struct sk_buff *skb,
 			      struct packet_type *pt_prev,
 			      struct net_device *orig_dev)
@@ -299,7 +299,7 @@ static struct packet_type ip_packet_type __read_mostly = {
 
   在`ip_rcv()`中，我们又看到了熟悉的Netfilter，这次对应的是`PREROUTING`状态，执行完定义的钩子函数后，会继续执行`ip_rcv_finish()`。
 
-```text
+```c
 int ip_rcv(struct sk_buff *skb, struct net_device *dev, struct packet_type *pt,
 	   struct net_device *orig_dev)
 {
@@ -315,7 +315,7 @@ int ip_rcv(struct sk_buff *skb, struct net_device *dev, struct packet_type *pt,
 
   `ip_rcv_finish()` 首先调用`ip_rcv_finish_core()`，该函数会先检测是否为广播、组播，如果不是则得到网络包对应的路由表，然后调用 `dst_input()`，在 `dst_input()` 中，调用的是 `struct rtable` 的成员的 `dst` 的 `input()` 函数。在 `rt_dst_alloc()` 中，我们可以看到`input` 函数指向的是 `ip_local_deliver()`。
 
-```text
+```c
 static int ip_rcv_finish(struct net *net, struct sock *sk, struct sk_buff *skb)
 {
 	struct net_device *dev = skb->dev;
