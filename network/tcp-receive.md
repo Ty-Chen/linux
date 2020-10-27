@@ -340,7 +340,7 @@ static inline int dst_input(struct sk_buff *skb)
 
   进入`ip_local_deliver()`意味着从`PREROUTING`确认进入本机处理，所以进入了状态`INPUT`，如果 IP 层进行了分段，则进行重新的组合。接下来就是我们熟悉的 `NF_HOOK`。在经过 `iptables` 规则处理完毕后，会调用 `ip_local_deliver_finish()`。
 
-```text
+```c
 int ip_local_deliver(struct sk_buff *skb)
 {
 	/*
@@ -359,7 +359,7 @@ int ip_local_deliver(struct sk_buff *skb)
 
   `ip_local_deliver_finish()`首先调用`__skb_pull()`从`sk_buff`中取下一个，接着调用`ip_protocol_deliver_rcu()`，该函数会从`inet_protos[protocol]`中找寻对应的处理函数进一步对收到的数据包进行解析。对应TCP的是`tcp_v4_rcv()`，UDP则是`udp_rcv()`。
 
-```text
+```c
 static int ip_local_deliver_finish(struct net *net, struct sock *sk, struct sk_buff *skb)
 {
 	__skb_pull(skb, skb_network_header_len(skb));
@@ -386,7 +386,7 @@ static struct net_protocol udp_protocol = {
 
   在 `tcp_v4_rcv()` 中，首先会获取 TCP 的头部，接着就开始处理 TCP 层的事情。因为 TCP 层是分状态的，状态被维护在数据结构 `struct sock` 里面，因而要根据 `IP` 地址以及 `TCP` 头里面的内容，在 `tcp_hashinfo` 中找到这个包对应的 struct sock，从而得到这个包对应的连接的状态。接下来就根据不同的状态做不同的处理。如在前文三次握手的分析中已经剖析了`TCP_NEW_SYN_RECV`后续的逻辑。对于正常通信包，则会涉及到三条队列的操作。
 
-```text
+```c
 int tcp_v4_rcv(struct sk_buff *skb)
 {
 	struct net *net = dev_net(skb->dev);
@@ -455,7 +455,7 @@ process:
 
   在 `tcp_v4_do_rcv()` 中会分两种情况处理，一种情况是连接已经建立，处于 `TCP_ESTABLISHED` 状态，调用 `tcp_rcv_established()`。另一种情况，就是未建立连接的状态，调用 `tcp_rcv_state_process()`。关于`tcp_rcv_state_process()`在三次握手中已分析过了，这里重点看`tcp_rcv_established()`。该函数会调用 `tcp_data_queue()`，将数据包放入 `sk_receive_queue` 队列进行处理。
 
-```text
+```c
 void tcp_rcv_established(struct sock *sk, struct sk_buff *skb)
 {
 	const struct tcphdr *th = (const struct tcphdr *)skb->data;
@@ -481,7 +481,7 @@ void tcp_rcv_established(struct sock *sk, struct sk_buff *skb)
 * 第四种情况，`seq` 小于 `rcv_nxt`，但是 `end_seq` 大于 `rcv_nxt`，这说明从 `seq` 到 `rcv_nxt` 这部分网络包原来的 ACK 客户端没有收到，所以重新发送了一次，从 `rcv_nxt` 到 `end_seq` 是新发送的，可以放入 `sk_receive_queue` 队列。
 * 第五种情况，是正好在接收窗口内但是不是期望接收的下一个包，则说明发生了乱序，调用`tcp_data_queue_ofo()`加入乱序队列中。
 
-```text
+```c
 static void tcp_data_queue(struct sock *sk, struct sk_buff *skb)
 {
     struct tcp_sock *tp = tcp_sk(sk);
@@ -556,7 +556,7 @@ drop:
 
   当接收的网络包进入各种队列之后，接下来我们就要等待用户进程去读取它们了。读取一个 `socket`，就像读取一个文件一样，读取 `socket` 的文件描述符，通过 `read` 系统调用。`read` 系统调用对于一个文件描述符的操作，大致过程都是类似的，在文件系统那一节，我们已经详细解析过。最终它会调用到用来表示一个打开文件的结构 `stuct file` 指向的 `file_operations` 操作。
 
-```text
+```c
 static const struct file_operations socket_file_ops = {
 ......
   .read_iter =  sock_read_iter,
@@ -566,7 +566,7 @@ static const struct file_operations socket_file_ops = {
 
   `sock_read_iter()`首先从虚拟文件系统中获取对应的文件，然后通过`file`获取对应的套接字`sock`，接着调用`sock_recvmsg()`读取该套接字对应的连接的数据包缓存队列。
 
-```text
+```c
 static ssize_t sock_read_iter(struct kiocb *iocb, struct iov_iter *to)
 {
 	struct file *file = iocb->ki_filp;
@@ -599,7 +599,7 @@ static inline int sock_recvmsg_nosec(struct socket *sock, struct msghdr *msg,
 
   `inet_recvmsg()`会调用协议对应的读操作，即`tcp_recvmsg()`进行读操作。
 
-```text
+```c
 int inet_recvmsg(struct socket *sock, struct msghdr *msg, size_t size,
 		 int flags)
 {
@@ -618,7 +618,7 @@ int inet_recvmsg(struct socket *sock, struct msghdr *msg, size_t size,
 * 处理`backlog`队列：调用`release_sock()`完成。`release_sock()` 会调用 `__release_sock()`，这里面会依次处理队列中的网络包。
 * 处理完所有队列后，调用 `sk_wait_data()`，继续等待在哪里，等待网络包的到来。
 
-```text
+```c
 int tcp_recvmsg(struct sock *sk, struct msghdr *msg, size_t len, int nonblock,
 		int flags, int *addr_len)
 {
