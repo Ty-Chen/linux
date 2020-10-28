@@ -362,10 +362,10 @@ int ip_local_deliver(struct sk_buff *skb)
 ```c
 static int ip_local_deliver_finish(struct net *net, struct sock *sk, struct sk_buff *skb)
 {
-	__skb_pull(skb, skb_network_header_len(skb));
-	rcu_read_lock();
-	ip_protocol_deliver_rcu(net, skb, ip_hdr(skb)->protocol);
-	rcu_read_unlock();
+    __skb_pull(skb, skb_network_header_len(skb));
+    rcu_read_lock();
+    ip_protocol_deliver_rcu(net, skb, ip_hdr(skb)->protocol);
+    rcu_read_unlock();
 	return 0;
 }
 
