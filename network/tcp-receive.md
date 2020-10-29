@@ -389,55 +389,55 @@ static struct net_protocol udp_protocol = {
 ```c
 int tcp_v4_rcv(struct sk_buff *skb)
 {
-	struct net *net = dev_net(skb->dev);
-	int sdif = inet_sdif(skb);
-	const struct iphdr *iph;
-	const struct tcphdr *th;
-	bool refcounted;
-	struct sock *sk;
-	int ret;
+    struct net *net = dev_net(skb->dev);
+    int sdif = inet_sdif(skb);
+    const struct iphdr *iph;
+    const struct tcphdr *th;
+    bool refcounted;
+    struct sock *sk;
+    int ret;
 ......
-	th = (const struct tcphdr *)skb->data;
-	iph = ip_hdr(skb);
+    th = (const struct tcphdr *)skb->data;
+    iph = ip_hdr(skb);
 lookup:
-	sk = __inet_lookup_skb(&tcp_hashinfo, skb, __tcp_hdrlen(th), th->source,
+    sk = __inet_lookup_skb(&tcp_hashinfo, skb, __tcp_hdrlen(th), th->source,
 			       th->dest, sdif, &refcounted);
-	if (!sk)
-		goto no_tcp_socket;
+    if (!sk)
+        goto no_tcp_socket;
 process:
-	if (sk->sk_state == TCP_TIME_WAIT)
-		goto do_time_wait;
-	if (sk->sk_state == TCP_NEW_SYN_RECV) {
-	......
-	}
+    if (sk->sk_state == TCP_TIME_WAIT)
+        goto do_time_wait;
+    if (sk->sk_state == TCP_NEW_SYN_RECV) {
+    ......
+    }
 ......
-	th = (const struct tcphdr *)skb->data;
-	iph = ip_hdr(skb);
-	tcp_v4_fill_cb(skb, iph, th);
-	skb->dev = NULL;
-	if (sk->sk_state == TCP_LISTEN) {
-		ret = tcp_v4_do_rcv(sk, skb);
-		goto put_and_return;
-	}
+    th = (const struct tcphdr *)skb->data;
+    iph = ip_hdr(skb);
+    tcp_v4_fill_cb(skb, iph, th);
+    skb->dev = NULL;
+    if (sk->sk_state == TCP_LISTEN) {
+        ret = tcp_v4_do_rcv(sk, skb);
+        goto put_and_return;
+    }
 ......
-	if (!sock_owned_by_user(sk)) {
-		ret = tcp_v4_do_rcv(sk, skb);
-	} else if (tcp_add_backlog(sk, skb)) {
-		goto discard_and_relse;
-	}
+    if (!sock_owned_by_user(sk)) {
+        ret = tcp_v4_do_rcv(sk, skb);
+    } else if (tcp_add_backlog(sk, skb)) {
+        goto discard_and_relse;
+    }
 ......
-	case TCP_TW_SYN: {
+    case TCP_TW_SYN: {
 ......
-	}
-		/* to ACK */
-		/* fall through */
-	case TCP_TW_ACK:
+    }
+    /* to ACK */
+    /* fall through */
+    case TCP_TW_ACK:
 ......
-	case TCP_TW_RST:
+    case TCP_TW_RST:
 ......
-	case TCP_TW_SUCCESS:;
-	}
-	goto discard_it;
+    case TCP_TW_SUCCESS:;
+    }
+    goto discard_it;
 }
 ```
 
